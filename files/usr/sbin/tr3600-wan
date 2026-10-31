@@ -1,0 +1,122 @@
+#!/bin/sh
+#
+# tr3600-wan: select the WAN interface source for the Cudy TR3600 v1.
+#
+# The board has two wired ports:
+#   eth0  = gmac0 = 2.5 G (2500base-x, external PHY1)   [factory WAN]
+#   eth1  = gmac1 = 1 G  (internal PHY15)               [factory LAN]
+# plus a USB cellular dongle (eth2, "tether").
+#
+# Three modes:
+#   eth0   (default) : WAN = eth0 (2.5G), LAN = eth1,  4G backup (metric 30)
+#   eth1             : WAN = eth1 (1G),   LAN = eth0,  4G backup (metric 30)
+#   tether           : WAN = 4G (metric 10), eth0 backup WAN (metric 20),
+#                      LAN = eth1
+#
+# The Wi-Fi AP (phy0.0-ap0) joins br-lan via `option network lan` in the
+# wireless config, so it is never touched here - only the wired bridge ports.
+
+usage() {
+	cat <<EOF
+Usage:
+  tr3600-wan show
+  tr3600-wan set eth0|eth1|tether
+  tr3600-wan reset
+EOF
+	exit 1
+}
+
+# ---- helpers ---------------------------------------------------------------
+
+# print the index of the network device section whose name is $1
+devidx() {
+	uci show network 2>/dev/null | \
+		sed -n "s/^network\.@device\[\([0-9]*\)\]\.name='$1'$/\1/p" | head -1
+}
+
+# set the bridge ports of the br-lan device section to a single port
+set_brlan_ports() {
+	local idx port="$1"
+	idx=$(devidx br-lan)
+	[ -n "$idx" ] || { echo "br-lan device section not found"; return 1; }
+	uci -q delete "network.@device[$idx].ports"
+	uci -q add_list "network.@device[$idx].ports=$port"
+}
+
+reload_net() {
+	uci -q commit network
+	/etc/init.d/network reload >/dev/null 2>&1
+	sleep 1
+}
+
+# ---- commands --------------------------------------------------------------
+
+mode_current() {
+	if [ "$(uci -q get network.tether.metric)" = "10" ] && \
+	   [ "$(uci -q get network.wan.metric)" = "20" ]; then
+		echo "tether"
+	else
+		echo "$(uci -q get network.wan.device)"
+	fi
+}
+
+cmd_show() {
+	local cur
+	cur=$(mode_current)
+	echo "当前 WAN 模式 : $cur"
+	echo "wan.device : $(uci -q get network.wan.device)"
+	echo "wan.metric : $(uci -q get network.wan.metric || echo '(默认)')"
+	echo "tether.metric : $(uci -q get network.tether.metric)"
+	echo "br-lan ports : $(uci -q get network.@device[$(devidx br-lan)].ports)"
+	echo "tether.device : $(uci -q get network.tether.device)"
+	echo "wan 状态 : $(ifstatus wan 2>/dev/null | grep -oE '\"up\":[[:space:]]*(true|false)' | head -1)"
+	echo "tether 状态 : $(ifstatus tether 2>/dev/null | grep -oE '\"up\":[[:space:]]*(true|false)' | head -1)"
+}
+
+cmd_set() {
+	local mode="$1"
+	case "$mode" in
+	eth0)
+		uci -q set network.wan.device='eth0'
+		uci -q set network.wan6.device='eth0'
+		uci -q delete network.wan.metric
+		uci -q set network.tether.metric='30'
+		set_brlan_ports eth1 || return 1
+		reload_net
+		echo "WAN -> eth0 (2.5G 主, 4G 备用, LAN=eth1)"
+		;;
+	eth1)
+		uci -q set network.wan.device='eth1'
+		uci -q set network.wan6.device='eth1'
+		uci -q delete network.wan.metric
+		uci -q set network.tether.metric='30'
+		set_brlan_ports eth0 || return 1
+		reload_net
+		echo "WAN -> eth1 (千兆主, 4G 备用, LAN=eth0)"
+		;;
+	tether)
+		uci -q set network.wan.device='eth0'
+		uci -q set network.wan6.device='eth0'
+		uci -q set network.wan.metric='20'
+		uci -q set network.tether.metric='10'
+		set_brlan_ports eth1 || return 1
+		reload_net
+		echo "WAN -> 4G tether (主), 有线 eth0 备用, LAN=eth1"
+		;;
+	*)
+		usage ;;
+	esac
+}
+
+case "$1" in
+show) cmd_show ;;
+set)
+	[ -n "$2" ] || usage
+	cmd_set "$2"
+	;;
+reset)
+	cmd_set eth0
+	;;
+*)
+	usage ;;
+esac

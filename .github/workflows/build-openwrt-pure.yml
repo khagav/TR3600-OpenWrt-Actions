@@ -424,6 +424,7 @@ jobs:
           CONFIG_PACKAGE_ddns-scripts \
           CONFIG_PACKAGE_luci-app-ddns \
           CONFIG_PACKAGE_luci-app-mosdns \
+          CONFIG_PACKAGE_odhcpd-ipv6only \
           CONFIG_PACKAGE_minidlna \
           CONFIG_PACKAGE_luci-app-minidlna \
           CONFIG_PACKAGE_stubby \
@@ -451,7 +452,7 @@ jobs:
           echo "::error title=wpad 没换::wpad-basic-mbedtls 仍为 =y，缺 802.11r/k/v 与 WPS"
           exit 1
         fi
-        echo "✅ 必需包齐全（39 项：fq 排程 / wpad-mbedtls / USB / VPN / samba4 / DDNS，含 daemon）"
+        echo "✅ 必需包齐全（40 项：fq 排程 / wpad-mbedtls / USB / VPN / samba4 / DDNS，含 daemon）"
         echo "========================================"
 
     # =========================================================
