@@ -14,12 +14,13 @@ return view.extend({
 		return this.showState().then(function(stateHtml) {
 			var wanInput = E('input', { 'class': 'cbi-input-text', 'placeholder': 'aa:bb:cc:dd:ee:ff', 'style': 'width:180px', 'spellcheck': 'false' });
 			var wifiInput = E('input', { 'class': 'cbi-input-text', 'placeholder': 'aa:bb:cc:dd:ee:ff', 'style': 'width:180px', 'spellcheck': 'false' });
+			var clientSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:300px' });
 
 			var btn = function(cls, label, fn) {
 				return E('button', { 'class': 'btn cbi-button ' + cls, 'click': fn }, label);
 			};
 
-			return E('div', { 'class': 'cbi-section' }, [
+			var root = E('div', { 'class': 'cbi-section' }, [
 				E('h3', _('当前 MAC 地址')),
 				E('div', { 'id': 'tr3600-mac-state' }, [ stateHtml ]),
 
@@ -31,6 +32,12 @@ return view.extend({
 					wanInput,
 					' ',
 					btn('cbi-button-apply', _('设置 WAN MAC'), self.handlerSet(self, 'wan', wanInput))
+				]),
+				E('div', { 'class': 'cbi-section-node' }, [
+					_('克隆已验证客户端 MAC 到 WAN：'),
+					clientSel,
+					' ',
+					btn('cbi-button-action', _('克隆选中客户端'), self.handlerClone(self, clientSel))
 				]),
 
 				E('h3', _('Wi-Fi 接口')),
@@ -49,7 +56,40 @@ return view.extend({
 					btn('cbi-button-reset', _('全部重置'), self.handler(self, 'all', 'reset'))
 				])
 			]);
+
+			// populate the client picker asynchronously (fire and forget)
+			self.populateClients(clientSel);
+
+			return root;
 		});
+	},
+
+	populateClients: function(sel) {
+		var self = this;
+		return fs.exec('/usr/sbin/tr3600-mac', ['clients']).then(function(r) {
+			var lines = (r.stdout || '').split('\n').filter(function(l) { return l.trim(); });
+			sel.replaceChildren();
+			var opt0 = E('option', { 'value': '' }, _('-- 选择客户端 --'));
+			sel.appendChild(opt0);
+			lines.forEach(function(l) {
+				var parts = l.trim().split(/\s+/);
+				var mac = parts[0], ip = parts[1] || '', host = parts[2] || '';
+				var o = E('option', { 'value': mac }, (mac + '  ' + ip + '  ' + host).trim());
+				sel.appendChild(o);
+			});
+		});
+	},
+
+	handlerClone: function(self, sel) {
+		return function(ev) {
+			ev.preventDefault();
+			var mac = sel.value || '';
+			if (!mac) {
+				ui.addNotification(null, E('p', _('请先选择要克隆的客户端')));
+				return;
+			}
+			return self.run('wan', 'clone', mac);
+		};
 	},
 
 	showState: function() {

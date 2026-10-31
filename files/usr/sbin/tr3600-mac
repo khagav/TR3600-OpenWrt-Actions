@@ -19,11 +19,34 @@ usage() {
 	cat <<EOF
 Usage:
   tr3600-mac show
-  tr3600-mac wan  random|set <mac>|reset
+  tr3600-mac clients
+  tr3600-mac wan  random|clone <mac>|set <mac>|reset
   tr3600-mac wifi random|set <mac>|reset
   tr3600-mac all  random|reset
 EOF
 	exit 1
+}
+
+# List LAN clients (MAC IP hostname), deduped by MAC.
+# Sources: DHCP leases (has hostname) + ARP/neigh on the LAN bridge.
+clients() {
+	local mac ip host seen=""
+	# DHCP leases: expiry MAC IP hostname clientid
+	if [ -f /tmp/dhcp.leases ]; then
+		while read -r _ mac ip host _; do
+			[ -n "$mac" ] || continue
+			case " $seen " in *" $mac "*) continue ;; esac
+			seen="$seen $mac"
+			echo "$mac $ip ${host:-?}"
+		done < /tmp/dhcp.leases
+	fi
+	# ARP/neigh on the LAN bridge (catches static/未走 DHCP 的)
+	ip neigh show dev br-lan 2>/dev/null | \
+		awk '/lladdr/ { print $3, $1, "arp" }' | while read -r mac ip h; do
+			case " $seen " in *" $mac "*) continue ;; esac
+			seen="$seen $mac"
+			echo "$mac $ip $h"
+		done
 }
 
 rand_mac() {
@@ -89,9 +112,21 @@ show)
 		i=$((i + 1))
 	done
 	;;
+clients)
+	clients
+	;;
 wan)
 	case "$arg" in
 	random) wan_set "$(rand_mac)" ;;
+	clone)
+		[ -n "$3" ] && valid_mac "$3" || { echo "bad MAC"; exit 1; }
+		if clients | grep -qi "^$(echo "$3" | tr 'A-F' 'a-f') "; then
+			wan_set "$3"
+		else
+			echo "MAC $3 不是已连接客户端（客户端列表见: tr3600-mac clients）"
+			exit 1
+		fi
+		;;
 	set) [ -n "$3" ] && valid_mac "$3" || { echo "bad MAC"; exit 1; }; wan_set "$3" ;;
 	reset) wan_reset ;;
 	*) usage ;;
