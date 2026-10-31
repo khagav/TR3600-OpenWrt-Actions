@@ -21,7 +21,7 @@ Usage:
   tr3600-mac show
   tr3600-mac clients
   tr3600-mac wan  random|clone <mac>|set <mac>|reset
-  tr3600-mac wifi random|set <mac>|reset
+  tr3600-mac wifi random|clone <mac>|set <mac>|reset   (clone 仅作用于 STA 接口)
   tr3600-mac all  random|reset
 EOF
 	exit 1
@@ -98,6 +98,27 @@ wifi_apply() {
 	echo "Wi-Fi MAC -> $([ "$action" = set ] && echo "$mac" || echo "factory default") ($n interfaces, applied)"
 }
 
+# Clone a verified client MAC onto STA-mode Wi-Fi interfaces (WISP / uplink
+# with a MAC whitelist).  AP interfaces are left alone - an AP MAC is a BSSID,
+# not an uplink identity, so cloning there is meaningless.
+wifi_clone() {
+	local mac="$1" s n=0 secs
+	secs=$(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-iface$/\1/p")
+	for s in $secs; do
+		[ "$(uci -q get wireless.$s.mode)" = "sta" ] || continue
+		uci -q set wireless.$s.macaddr="$mac"
+		n=$((n + 1))
+	done
+	if [ "$n" = "0" ]; then
+		echo "没有 STA 模式 Wi-Fi 接口（克隆仅对 STA/WISP 上行有意义）"
+		echo "请先在 LuCI 把某 Wi-Fi 接口设为客户端(STA)模式再克隆。"
+		exit 1
+	fi
+	uci -q commit wireless
+	wifi reload >/dev/null 2>&1
+	echo "Wi-Fi STA MAC -> $mac ($n interfaces, applied)"
+}
+
 cmd="$1"
 arg="$2"
 
@@ -135,6 +156,15 @@ wan)
 wifi)
 	case "$arg" in
 	random) wifi_apply set "$(rand_mac)" ;;
+	clone)
+		[ -n "$3" ] && valid_mac "$3" || { echo "bad MAC"; exit 1; }
+		if clients | grep -qi "^$(echo "$3" | tr 'A-F' 'a-f') "; then
+			wifi_clone "$3"
+		else
+			echo "MAC $3 不是已连接客户端（客户端列表见: tr3600-mac clients）"
+			exit 1
+		fi
+		;;
 	set) [ -n "$3" ] && valid_mac "$3" || { echo "bad MAC"; exit 1; }; wifi_apply set "$3" ;;
 	reset) wifi_apply reset ;;
 	*) usage ;;

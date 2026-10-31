@@ -15,6 +15,7 @@ return view.extend({
 			var wanInput = E('input', { 'class': 'cbi-input-text', 'placeholder': 'aa:bb:cc:dd:ee:ff', 'style': 'width:180px', 'spellcheck': 'false' });
 			var wifiInput = E('input', { 'class': 'cbi-input-text', 'placeholder': 'aa:bb:cc:dd:ee:ff', 'style': 'width:180px', 'spellcheck': 'false' });
 			var clientSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:300px' });
+			var wifiClientSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:300px' });
 
 			var btn = function(cls, label, fn) {
 				return E('button', { 'class': 'btn cbi-button ' + cls, 'click': fn }, label);
@@ -37,7 +38,7 @@ return view.extend({
 					_('克隆已验证客户端 MAC 到 WAN：'),
 					clientSel,
 					' ',
-					btn('cbi-button-action', _('克隆选中客户端'), self.handlerClone(self, clientSel))
+					btn('cbi-button-action', _('克隆选中客户端'), self.handlerClone(self, 'wan', clientSel))
 				]),
 
 				E('h3', _('Wi-Fi 接口')),
@@ -49,6 +50,12 @@ return view.extend({
 					' ',
 					btn('cbi-button-apply', _('设置 Wi-Fi MAC'), self.handlerSet(self, 'wifi', wifiInput))
 				]),
+				E('div', { 'class': 'cbi-section-node' }, [
+					_('克隆已验证客户端 MAC 到 Wi-Fi STA（仅客户端/中继模式，含上级 MAC 白名单）：'),
+					wifiClientSel,
+					' ',
+					btn('cbi-button-action', _('克隆到 Wi-Fi STA'), self.handlerClone(self, 'wifi', wifiClientSel))
+				]),
 
 				E('h3', _('全部接口')),
 				E('div', { 'class': 'cbi-section-node' }, [
@@ -57,8 +64,9 @@ return view.extend({
 				])
 			]);
 
-			// populate the client picker asynchronously (fire and forget)
+			// populate the client pickers asynchronously (fire and forget)
 			self.populateClients(clientSel);
+			self.populateClients(wifiClientSel);
 
 			return root;
 		});
@@ -80,7 +88,7 @@ return view.extend({
 		});
 	},
 
-	handlerClone: function(self, sel) {
+	handlerClone: function(self, scope, sel) {
 		return function(ev) {
 			ev.preventDefault();
 			var mac = sel.value || '';
@@ -88,7 +96,7 @@ return view.extend({
 				ui.addNotification(null, E('p', _('请先选择要克隆的客户端')));
 				return;
 			}
-			return self.run('wan', 'clone', mac);
+			return self.run(scope, 'clone', mac);
 		};
 	},
 
