@@ -1,0 +1,57 @@
+#!/bin/sh
+#
+# tr3600-ttl - toggle the IPv4 TTL clamp.
+#
+#   tr3600-ttl status
+#   tr3600-ttl on
+#   tr3600-ttl off
+#
+# The rule itself lives in /etc/nftables.d/90-tr3600-ttl.nft, which firewall4
+# includes automatically.  "off" moves it to /etc/tr3600-ttl.off (outside the
+# include directory) and reloads the firewall; "on" moves it back.
+
+ACTIVE=/etc/nftables.d/90-tr3600-ttl.nft
+DISABLED=/etc/tr3600-ttl.off
+
+reload_fw() {
+	if [ -x /etc/init.d/firewall ]; then
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	else
+		fw4 reload >/dev/null 2>&1
+	fi
+}
+
+case "$1" in
+on)
+	if [ -f "$ACTIVE" ]; then
+		echo "TTL clamp already enabled"
+	else
+		[ -f "$DISABLED" ] || { echo "missing $DISABLED - reinstall the firmware"; exit 1; }
+		mkdir -p "$(dirname "$ACTIVE")"
+		mv "$DISABLED" "$ACTIVE"
+		reload_fw
+		echo "TTL clamp enabled (all WAN egress -> TTL 64)"
+	fi
+	;;
+off)
+	if [ ! -f "$ACTIVE" ]; then
+		echo "TTL clamp already disabled"
+	else
+		mv "$ACTIVE" "$DISABLED"
+		reload_fw
+		echo "TTL clamp disabled"
+	fi
+	;;
+status|"")
+	if [ -f "$ACTIVE" ]; then
+		echo "enabled"
+		nft list chain inet fw4 tr3600_ttl 2>/dev/null | sed 's/^/  /'
+	else
+		echo "disabled"
+	fi
+	;;
+*)
+	echo "Usage: tr3600-ttl on|off|status"
+	exit 1
+	;;
+esac

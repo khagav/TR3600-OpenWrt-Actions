@@ -1,0 +1,39 @@
+#!/bin/sh
+#
+# 3600wrt: spread MediaTek ethernet / Wi-Fi interrupts across all CPUs.
+#
+# MT7987 is a 4x Cortex-A53.  By default every queue IRQ of mtk_eth and
+# mt7996e lands on CPU0, so a single 2.5G flow can saturate one core while the
+# other three idle (visible as one CPU pegged at ~100% sirq in top).
+# Round-robin pinning gives each queue its own core.
+#
+# Safe by construction: only IRQs whose name matches the MediaTek net/wifi
+# drivers are touched; on any other board the pattern does not match and the
+# script exits without doing anything.
+
+[ -r /proc/interrupts ] || exit 0
+
+NCPU=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null)
+[ -n "$NCPU" ] && [ "$NCPU" -gt 1 ] || exit 0
+
+IRQS=$(awk -F: '/mt7996|mt7987|mtk_eth|mtk-wed|eth0|eth1/ {print $1}' /proc/interrupts 2>/dev/null)
+
+[ -n "$IRQS" ] || exit 0
+
+i=0
+n=0
+for irq in $IRQS; do
+	case "$irq" in
+		''|*[!0-9]*) continue ;;
+	esac
+	[ -w "/proc/irq/$irq/smp_affinity" ] || continue
+	mask=$(printf '%x' $((1 << (i % NCPU))))
+	if echo "$mask" > "/proc/irq/$irq/smp_affinity" 2>/dev/null; then
+		n=$((n + 1))
+	fi
+	i=$((i + 1))
+done
+
+[ "$n" -gt 0 ] && logger -t tr3600-irq "pinned $n IRQs across $NCPU CPUs"
+
+exit 0

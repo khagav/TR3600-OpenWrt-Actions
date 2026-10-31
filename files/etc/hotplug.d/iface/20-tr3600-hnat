@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# 3600wrt: re-arm the MediaTek PPE (HNAT) hook whenever a WAN interface
+# comes up.
+#
+# mtk_hnat installs a netfilter hook that lets the PPE take over established
+# flows.  netifd tears the hook down when the WAN device is destroyed (which
+# happens on every USB-tether re-enumeration) and does not necessarily bring
+# it back when the interface is recreated.  The visible symptom is subtle:
+# everything works, but 2.5G NAT silently falls back to the software path.
+#
+# The stock GL.iNet firmware does exactly this in
+# /etc/hotplug.d/iface/01-mtk-acceleration.
+
+[ "$ACTION" = "ifup" ] || exit 0
+
+case "$INTERFACE" in
+	wan|wan6|tether|wwan*) ;;
+	*) exit 0 ;;
+esac
+
+HOOK=/sys/kernel/debug/hnat/hook_toggle
+
+if [ ! -e "$HOOK" ]; then
+	# debugfs is normally mounted by /etc/init.d/sysctl; be defensive.
+	mountpoint -q /sys/kernel/debug 2>/dev/null || \
+		mount -t debugfs none /sys/kernel/debug 2>/dev/null
+fi
+
+[ -w "$HOOK" ] || exit 0
+
+echo 1 > "$HOOK" 2>/dev/null && \
+	logger -t tr3600-hnat "PPE hook re-armed after ${INTERFACE} ifup"
+
+exit 0
