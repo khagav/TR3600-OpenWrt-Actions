@@ -1,0 +1,39 @@
+#!/bin/sh
+#
+# Cudy TR3600 v1 / Kwrt: enable the 4G self-heal watchdog with sane defaults.
+# Runs once on first boot of every newly flashed image. Idempotent.
+
+[ -f /tmp/sysinfo/board_name ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "cudy,tr3600-v1" ] || exit 0
+
+# --- 4G self-heal watchdog defaults (don't clobber a user's own settings) ---
+if ! uci -q get tr3600.wwatch >/dev/null 2>&1; then
+	uci -q set tr3600.wwatch=wwatch
+	uci -q set tr3600.wwatch.enabled='1'
+	uci -q set tr3600.wwatch.thresh='2'
+	uci -q set tr3600.wwatch.target='223.5.5.5 8.8.8.8'
+	uci -q set tr3600.wwatch.allow_reboot='0'
+	uci -q commit tr3600
+fi
+
+# --- turn it on (creates the rc.d symlink + installs the cron line) ---------
+if [ -x /etc/init.d/tr3600-4g-wwatch ]; then
+	/etc/init.d/tr3600-4g-wwatch enable >/dev/null 2>&1
+	/etc/init.d/tr3600-4g-wwatch start  >/dev/null 2>&1
+fi
+
+# --- boot-time tuning (IRQ affinity) ----------------------------------------
+if [ -x /etc/init.d/tr3600-tuning ]; then
+	/etc/init.d/tr3600-tuning enable >/dev/null 2>&1
+fi
+
+# --- first-run setup wizard state -------------------------------------------
+# The wizard (LuCI -> 設置向導) writes the admin password and the Wi-Fi
+# settings, then flips done=1.  Everything else reads this flag.
+if ! uci -q get tr3600.setup >/dev/null 2>&1; then
+	uci -q set tr3600.setup=setup
+	uci -q set tr3600.setup.done='0'
+	uci -q commit tr3600
+fi
+
+exit 0

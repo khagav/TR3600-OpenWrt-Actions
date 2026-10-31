@@ -1,0 +1,108 @@
+#!/bin/sh
+#
+# Cudy TR3600 v1 board defaults for the OpenWrt (official base) build.
+# Runs once on first boot of every newly flashed image.
+#
+# NOTE: this is the official-base adaptation of the 3600wrt Kwrt script.
+#   - Fan:      NOT here.  The official build ships luci-app-tr3600-fan + DTS
+#               patches (0001/0006/0007) that set the 68/78/88 C curve, so
+#               there is no luci-fan on_temp to sync.
+#   - Theme:    NOT here.  Official 25.12 has no aurora; bootstrap is the
+#               native theme (set by 99-tr3600-pure-defaults in part2).
+#   - nginx:    NOT here.  Official base uses uhttpd, no nginx conf.d.
+
+[ -f /tmp/sysinfo/board_name ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name)" = "cudy,tr3600-v1" ] || exit 0
+
+# ---------------------------------------------------------------------------
+# USB cellular dongle.
+#
+# A plain dhcp interface bound to the dongle's netdev is enough - it comes up
+# when the device appears and recovers on its own after a link drop.  The
+# netdev name depends on enumeration order, so /etc/hotplug.d/net/
+# 25-tr3600-usb-tether re-points it whenever a USB ethernet device shows up.
+# ---------------------------------------------------------------------------
+if ! uci -q get network.tether >/dev/null; then
+	uci -q set network.tether=interface
+	uci -q set network.tether.proto='dhcp'
+	uci -q set network.tether.force_link='0'
+	uci -q set network.tether.metric='30'
+	uci -q set network.tether.peerdns='1'
+	uci -q set network.tether.defaultroute='1'
+	uci -q set network.tether.device='eth2'
+	uci -q commit network
+fi
+
+# Put it in the (masqueraded) wan zone, but only once.
+i=0
+while uci -q get "firewall.@zone[$i]" >/dev/null; do
+	if [ "$(uci -q get "firewall.@zone[$i].name")" = "wan" ]; then
+		case " $(uci -q get "firewall.@zone[$i].network") " in
+			*" tether "*)
+				;;
+			*)
+				uci -q add_list "firewall.@zone[$i].network=tether"
+				uci -q commit firewall
+				;;
+		esac
+		break
+	fi
+	i=$((i + 1))
+done
+
+# ---------------------------------------------------------------------------
+# DNS cache: OpenWrt defaults to 1000 entries, which thrashes on a busy LAN
+# (and with stubby/DoT in front the upstream round trip is not free).
+# ---------------------------------------------------------------------------
+if uci -q get dhcp.@dnsmasq[0] >/dev/null; then
+	cur=$(uci -q get dhcp.@dnsmasq[0].cachesize)
+	case "$cur" in ''|*[!0-9]*) cur=0 ;; esac
+	if [ "$cur" -lt 10000 ]; then
+		uci -q set dhcp.@dnsmasq[0].cachesize='10000'
+		uci -q commit dhcp
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# First-run setup wizard (uhttpd).
+#
+# The official base uses uhttpd, which has no nginx-style
+# `if (-f ...) return 302` — so the redirect is done via /www/index.html:
+# while /etc/tr3600-setup-pending exists we point "/" at the wizard, and the
+# wizard's on_after_commit rewrites index.html back to /cgi-bin/luci/ once the
+# admin password and Wi-Fi are set.  A fresh flash therefore always lands on
+# the wizard instead of an unconfigured router.
+# ---------------------------------------------------------------------------
+wizard_index() {
+	local url="$1"
+	cat > /www/index.html <<EOF
+<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=$url"></head><body></body></html>
+EOF
+}
+
+if [ "$(uci -q get tr3600.setup.done)" != "1" ]; then
+	touch /etc/tr3600-setup-pending
+	wizard_index "/cgi-bin/luci/admin/tr3600-setup"
+else
+	rm -f /etc/tr3600-setup-pending
+	wizard_index "/cgi-bin/luci/"
+fi
+
+# ---------------------------------------------------------------------------
+# Scheduled reboot (autoreboot).
+#
+# Official 25.12 has no luci-app-autoreboot, so we use cron: reboot every day
+# at 04:30 (quiet hours).  Only if the user has not already set their own
+# schedule.
+# ---------------------------------------------------------------------------
+if [ ! -f /etc/crontabs/root ]; then
+	mkdir -p /etc/crontabs
+	echo '30 4 * * * /sbin/reboot' > /etc/crontabs/root
+	/etc/init.d/cron enable >/dev/null 2>&1
+	/etc/init.d/cron restart >/dev/null 2>&1
+elif ! grep -q 'reboot' /etc/crontabs/root 2>/dev/null; then
+	echo '30 4 * * * /sbin/reboot' >> /etc/crontabs/root
+	/etc/init.d/cron restart >/dev/null 2>&1
+fi
+
+exit 0

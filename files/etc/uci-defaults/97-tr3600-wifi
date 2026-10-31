@@ -1,0 +1,90 @@
+#!/bin/sh
+#
+# 3600wrt: unify the Wi-Fi SSID and turn both radios on.
+#
+# Kwrt ships no /etc/config/wireless at all - it is generated on first boot
+# from board.json, with both radios disabled and no encryption.  This script
+# runs once per fresh flash (uci-defaults are deleted after a successful run)
+# and gives the board one SSID shared by every band, WPA2-PSK, both radios up.
+#
+# It is deliberately conservative: an SSID that is not one of the known
+# factory/our defaults is left alone, so a sysupgrade that keeps /etc does not
+# clobber a user's own Wi-Fi settings.
+
+[ -f /tmp/sysinfo/board_name ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "cudy,tr3600-v1" ] || exit 0
+
+# Default Wi-Fi is the "setup" network you use to reach the first-run wizard:
+# SSID wrt, WPA2-PSK with the literal key "nopassword" (10 chars, valid).  The
+# wizard then asks you to set your own SSID + password.  6 GHz cannot do
+# WPA2-only, so that band automatically falls back to WPA3-SAE (see below).
+DEFAULT_SSID='wrt'
+DEFAULT_KEY='nopassword'
+
+# Generate the wireless config if this is a truly fresh flash.
+[ -f /etc/config/wireless ] || wifi config >/dev/null 2>&1
+
+# --- enable every radio -----------------------------------------------------
+i=0
+while uci -q get "wireless.@wifi-device[$i]" >/dev/null; do
+	uci -q set "wireless.@wifi-device[$i].disabled='0'"
+	i=$((i + 1))
+done
+
+# --- one SSID / one key for every AP interface ------------------------------
+i=0
+while uci -q get "wireless.@wifi-iface[$i]" >/dev/null; do
+	if [ "$(uci -q get "wireless.@wifi-iface[$i].mode")" = "ap" ]; then
+		cur_ssid=$(uci -q get "wireless.@wifi-iface[$i].ssid")
+		cur_enc=$(uci -q get "wireless.@wifi-iface[$i].encryption")
+		dev=$(uci -q get "wireless.@wifi-iface[$i].device")
+		band=$(uci -q get "wireless.$dev.band")
+
+		# Kwrt generates per-band SSIDs like "Kwrt_2.4G"/"Kwrt_5G" (and some
+		# builds use lowercase "kwrt-...").  Treat those as factory defaults so
+		# they get unified to $DEFAULT_SSID too.
+		case "$cur_ssid" in
+			''|OpenWrt|LEDE|Kwrt*|kwrt*|"$DEFAULT_SSID")
+				uci -q set "wireless.@wifi-iface[$i].ssid=$DEFAULT_SSID"
+				;;
+		esac
+
+		# 6 GHz forbids WPA2-only, use WPA3-SAE there.
+		if [ "$band" = "6g" ]; then
+			enc='sae'
+		else
+			enc='psk2'
+		fi
+
+		case "$cur_enc" in
+			''|none)
+				uci -q set "wireless.@wifi-iface[$i].encryption=$enc"
+				uci -q set "wireless.@wifi-iface[$i].key=$DEFAULT_KEY"
+				;;
+		esac
+
+		uci -q set "wireless.@wifi-iface[$i].disabled='0'"
+	fi
+	i=$((i + 1))
+done
+
+# --- htmode: cap at HE (WiFi 6) ----------------------------------------------
+# The mt7996e driver + kernel 6.12 mac80211 backport in Kwrt cannot apply EHT
+# (WiFi 7): `wifi up` dies with "command failed: Not supported (-95)" and the
+# radio never comes up.  Verified on hardware: with htmode HE20(2.4G)/HE80(5G)
+# both radios come up and hostapd reaches AP-ENABLED.  2.4G is capped at HE20
+# (the widest width confirmed working); raise to HE40 in LuCI if you want more
+# 2.4G throughput and it proves stable.
+i=0
+while uci -q get "wireless.@wifi-device[$i]" >/dev/null; do
+	band=$(uci -q get "wireless.@wifi-device[$i].band")
+	case "$band" in
+		2g)  uci -q set "wireless.@wifi-device[$i].htmode=HE20" ;;
+		5g|6g) uci -q set "wireless.@wifi-device[$i].htmode=HE80" ;;
+	esac
+	i=$((i + 1))
+done
+
+uci -q commit wireless
+
+exit 0

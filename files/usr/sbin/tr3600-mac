@@ -1,0 +1,118 @@
+#!/bin/sh
+#
+# tr3600-mac - change the WAN and Wi-Fi MAC addresses.
+#
+#   tr3600-mac show
+#   tr3600-mac wan  random | set <mac> | reset
+#   tr3600-mac wifi random | set <mac> | reset
+#   tr3600-mac all  random | reset
+#
+# "random" generates a locally-administered unicast address (first octet
+# 0x02-0xFD with the multicast bit clear), so it never collides with a real
+# vendor prefix.  Settings are written to UCI and survive reboots/upgrades
+# (sysupgrade keeps /etc/config).
+#
+# Only the WAN interface and the Wi-Fi AP interfaces are touched: the LAN
+# bridge MAC stays the factory one so DHCP reservations keep working.
+
+usage() {
+	cat <<EOF
+Usage:
+  tr3600-mac show
+  tr3600-mac wan  random|set <mac>|reset
+  tr3600-mac wifi random|set <mac>|reset
+  tr3600-mac all  random|reset
+EOF
+	exit 1
+}
+
+rand_mac() {
+	# 6 random bytes, force locally-administered (bit 1 set) + unicast (bit 0 clear)
+	b=$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
+	[ ${#b} -eq 12 ] || b="02aabbccddee"
+	o1=$((0x$(echo "$b" | cut -c1-2)))
+	o1=$(( (o1 & 0xfc) | 0x02 ))
+	printf '%02x:%s:%s:%s:%s:%s\n' "$o1" \
+		"$(echo "$b" | cut -c3-4)" "$(echo "$b" | cut -c5-6)" \
+		"$(echo "$b" | cut -c7-8)" "$(echo "$b" | cut -c9-10)" \
+		"$(echo "$b" | cut -c11-12)"
+}
+
+valid_mac() {
+	echo "$1" | grep -Eq '^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$'
+}
+
+wan_set() {
+	uci -q set network.wan.macaddr="$1"
+	uci -q commit network
+	ifup wan >/dev/null 2>&1 || ubus call network.interface.wan up >/dev/null 2>&1
+	echo "WAN MAC -> $1 (applied)"
+}
+
+wan_reset() {
+	uci -q delete network.wan.macaddr
+	uci -q commit network
+	ifup wan >/dev/null 2>&1 || ubus call network.interface.wan up >/dev/null 2>&1
+	echo "WAN MAC -> factory default (applied)"
+}
+
+wifi_apply() {
+	# $1 = "set" | "reset", $2 = mac (for set)
+	local action="$1" mac="$2" n=0
+	local secs
+	secs=$(uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)=wifi-iface$/\1/p")
+	for s in $secs; do
+		[ "$(uci -q get wireless.$s.mode)" = "ap" ] || continue
+		if [ "$action" = "set" ]; then
+			uci -q set wireless.$s.macaddr="$mac"
+		else
+			uci -q delete wireless.$s.macaddr
+		fi
+		n=$((n + 1))
+	done
+	uci -q commit wireless
+	wifi reload >/dev/null 2>&1
+	echo "Wi-Fi MAC -> $([ "$action" = set ] && echo "$mac" || echo "factory default") ($n interfaces, applied)"
+}
+
+cmd="$1"
+arg="$2"
+
+case "$cmd" in
+show)
+	echo "WAN   : $(uci -q get network.wan.macaddr || echo '(factory)')"
+	i=0
+	while uci -q get "wireless.@wifi-iface[$i]" >/dev/null; do
+		if [ "$(uci -q get "wireless.@wifi-iface[$i].mode")" = "ap" ]; then
+			echo "Wi-Fi[$i]: $(uci -q get "wireless.@wifi-iface[$i].macaddr" || echo '(factory)')  ssid=$(uci -q get "wireless.@wifi-iface[$i].ssid")"
+		fi
+		i=$((i + 1))
+	done
+	;;
+wan)
+	case "$arg" in
+	random) wan_set "$(rand_mac)" ;;
+	set) [ -n "$3" ] && valid_mac "$3" || { echo "bad MAC"; exit 1; }; wan_set "$3" ;;
+	reset) wan_reset ;;
+	*) usage ;;
+	esac
+	;;
+wifi)
+	case "$arg" in
+	random) wifi_apply set "$(rand_mac)" ;;
+	set) [ -n "$3" ] && valid_mac "$3" || { echo "bad MAC"; exit 1; }; wifi_apply set "$3" ;;
+	reset) wifi_apply reset ;;
+	*) usage ;;
+	esac
+	;;
+all)
+	case "$arg" in
+	random) wan_set "$(rand_mac)"; wifi_apply set "$(rand_mac)" ;;
+	reset) wan_reset; wifi_apply reset ;;
+	*) usage ;;
+	esac
+	;;
+*)
+	usage
+	;;
+esac

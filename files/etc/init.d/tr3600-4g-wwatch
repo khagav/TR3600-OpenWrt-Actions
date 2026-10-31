@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+# Cudy TR3600 v1 / Kwrt: schedule the 4G self-heal watchdog once a minute.
+# Same cron-driven idiom stock Cudy uses for its autoreboot.
+START=96
+
+CRON=/etc/crontabs/root
+LINE='* * * * * /usr/sbin/tr3600-4g-wwatch >/dev/null 2>&1'
+
+install_line() {
+	[ -x /usr/sbin/tr3600-4g-wwatch ] || return 0
+	[ -f "$CRON" ] || : > "$CRON"
+	grep -q 'tr3600-4g-wwatch' "$CRON" 2>/dev/null || echo "$LINE" >> "$CRON"
+	/etc/init.d/cron enable 2>/dev/null
+	/etc/init.d/cron restart 2>/dev/null
+}
+
+remove_line() {
+	[ -f "$CRON" ] || return 0
+	sed -i '/tr3600-4g-wwatch/d' "$CRON" 2>/dev/null
+	/etc/init.d/cron restart 2>/dev/null
+}
+
+start() { install_line; }
+stop()  { remove_line; }
+reload() { remove_line; install_line; }

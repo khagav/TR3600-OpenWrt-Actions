@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+#
+# 3600wrt: boot-time tuning that has to be re-applied on every boot
+# (IRQ numbers are not stable across reboots).
+#
+# dnsmasq cache size and the rest of the static defaults live in
+# /etc/uci-defaults/99-tr3600-defaults instead.
+
+START=95
+
+boot() {
+	/usr/sbin/tr3600-irq-affinity
+}
+
+start() {
+	/usr/sbin/tr3600-irq-affinity
+}

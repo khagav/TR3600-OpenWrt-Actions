@@ -238,7 +238,6 @@ TCP 16 MB 緩衝區以前寫在 `package/base-files/files/etc/sysctl.conf`，但
 | wireguard | `kmod-wireguard` + `wireguard-tools` + `luci-proto-wireguard` | 官方 |
 | tailscale | `tailscale` + `luci-app-tailscale-community` | 官方 |
 | openvpn | `openvpn-openssl` + `luci-app-openvpn` + `openvpn-easy-rsa` | 官方 |
-| passwall2 | `luci-app-passwall2` | **第三方**（只編 Xray 核心） |
 | aria2 | `aria2` + `luci-app-aria2` | 官方 |
 | samba4 | `samba4-server` + `luci-app-samba4` | 官方 |
 | webdav | `luci-app-webdav` | **第三方** |
@@ -248,7 +247,7 @@ TCP 16 MB 緩衝區以前寫在 `package/base-files/files/etc/sysctl.conf`，但
 
 ### 第三方 feed
 
-`passwall2 / mosdns / ddns-go / webdav` 官方 feed 都沒有（實測 apk 索引 + 上游倉庫）。
+`mosdns / ddns-go / webdav` 官方 feed 都沒有（實測 apk 索引 + 上游倉庫）。
 `diy-pure-part1.sh` 會把這兩個 feed 追加到 `feeds.conf.default`：
 
 ```
@@ -260,10 +259,10 @@ src-git small   https://github.com/kenzok8/small-package.git
 duplicate package。kenzok8 的聚合 feed 跟官方 feed 撞名的套件（例如 `aria2`），
 `scripts/feeds install -a` 會自己跳過並印 WARNING，那是預期行為。
 
-> ⚠️ 這是本建置線**唯一的外部依賴**。第三方 feed 會漂移 —— 舊的
-> `xiaorouji/openwrt-passwall2` 已經 404（搬到 `Openwrt-Passwall` 組織了），
+> ⚠️ 這是本建置線**唯一的外部依賴**。第三方 feed 會漂移 —— 2026-10-31 起
+> passwall2 已依使用者要求移除（該作者倉庫一度 404 搬到 `Openwrt-Passwall`），
 > 當年 `liangcanming/luci-app-tr3600-fan` 更是整個消失。退路：把 part1 裡那兩行
-> 註解掉，並在 config 把那四個 `luci-app-*` 改成 `not set`。
+> 註解掉，並在 config 把那幾個 `luci-app-*` 改成 `not set`。
 
 ### zerotier 沒有 LuCI 頁
 

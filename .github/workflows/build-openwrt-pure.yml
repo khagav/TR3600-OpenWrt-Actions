@@ -312,7 +312,7 @@ jobs:
         # scripts/feeds 自己会跳过并印 WARNING —— 那是预期行为，不是错误。
         ./scripts/feeds install -a
         echo "==== 第三方套件是否真的 link 进来了 ===="
-        for p in luci-app-passwall2 luci-app-mosdns luci-app-ddns-go luci-app-webdav; do
+        for p in luci-app-mosdns luci-app-ddns-go luci-app-webdav; do
           d=$(ls -d package/feeds/*/"$p" 2>/dev/null | head -1)
           if [ -n "$d" ]; then
             echo "  [OK] $p -> $d"
@@ -423,15 +423,17 @@ jobs:
           CONFIG_PACKAGE_luci-app-samba4 \
           CONFIG_PACKAGE_ddns-scripts \
           CONFIG_PACKAGE_luci-app-ddns \
-          CONFIG_PACKAGE_luci-app-passwall2 \
           CONFIG_PACKAGE_luci-app-mosdns \
+          CONFIG_PACKAGE_minidlna \
+          CONFIG_PACKAGE_luci-app-minidlna \
+          CONFIG_PACKAGE_stubby \
+          CONFIG_PACKAGE_miniupnpd-nftables \
           CONFIG_PACKAGE_luci-app-ddns-go \
           CONFIG_PACKAGE_luci-app-webdav \
           CONFIG_PACKAGE_ddns-go \
           CONFIG_PACKAGE_mosdns \
           CONFIG_PACKAGE_rpcd-mod-wireguard \
           CONFIG_PACKAGE_openvpn-easy-rsa \
-          CONFIG_PACKAGE_luci-app-passwall2_Basic_Core_Xray \
         ; do
           if grep -q "^${sym}=y" .config; then
             echo "  [OK] $sym"
@@ -449,7 +451,7 @@ jobs:
           echo "::error title=wpad 没换::wpad-basic-mbedtls 仍为 =y，缺 802.11r/k/v 与 WPS"
           exit 1
         fi
-        echo "✅ 必需包齐全（37 项：fq 排程 / wpad-mbedtls / USB / VPN / passwall2 / samba4 / DDNS，含 daemon）"
+        echo "✅ 必需包齐全（39 项：fq 排程 / wpad-mbedtls / USB / VPN / samba4 / DDNS，含 daemon）"
         echo "========================================"
 
     # =========================================================

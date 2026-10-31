@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# Cudy TR3600 v1 / Kwrt: point network.tether at whatever USB-attached
+# ethernet device has just appeared.
+#
+# Background: Kwrt has no /lib/network/wwan/<vid>:<pid> profile, so the stock
+# /etc/hotplug.d/usb/00_wwan.sh bails out on its first test and never creates
+# an interface for a USB cellular dongle.  A plain dhcp interface named
+# "tether" is enough (netifd tracks device hotplug and recovers after drops by
+# itself) - the only thing that cannot be hardcoded is the netdev name, which
+# depends on enumeration order.
+
+[ "$ACTION" = "add" ] || exit 0
+[ -n "$INTERFACE" ] || exit 0
+
+case "$INTERFACE" in
+	br-*|lo|ip6tnl*|dheth*) exit 0 ;;
+esac
+
+[ -f /tmp/sysinfo/board_name ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name)" = "cudy,tr3600-v1" ] || exit 0
+
+# Only USB-attached netdevs: walk up the device path looking for a USB
+# idVendor attribute.  The SoC ethernets (mtk_soc_eth, platform devices) do
+# not have one.
+d="$(readlink -f "/sys/class/net/$INTERFACE/device" 2>/dev/null)"
+found=
+while [ -n "$d" ] && [ "$d" != "/" ]; do
+	if [ -f "$d/idVendor" ]; then
+		found=1
+		break
+	fi
+	d="$(dirname "$d")"
+done
+[ -n "$found" ] || exit 0
+
+uci -q get network.tether >/dev/null || exit 0
+
+if [ "$(uci -q get network.tether.device)" != "$INTERFACE" ]; then
+	logger -t tr3600-tether "USB netdev $INTERFACE -> network.tether"
+	uci -q set "network.tether.device=$INTERFACE"
+	uci -q commit network
+	ifup tether
+fi
+
+exit 0

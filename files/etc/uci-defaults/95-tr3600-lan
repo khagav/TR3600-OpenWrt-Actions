@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# Cudy TR3600 v1 (official base): LAN management address + hostname.
+#
+# Runs first (95 < 97 < 98 < 99), before the Wi-Fi / extras / board-defaults
+# scripts, so the router is already on 10.0.0.1 when the wizard redirect fires.
+#
+#   LAN IP      10.0.0.1/24   ->   https://10.0.0.1/
+#   Hostname    wrt           ->   http://wrt via DHCP/DNS
+#
+# The DHCP pool is derived from the lan /24, so the clients get
+# 10.0.0.100 - 10.0.0.249.  (The official base defaults to 192.168.6.1 via
+# part2's sed; this script overrides it to 10.0.0.1 to match the 3600wrt
+# Kwrt build the user is familiar with.)
+
+[ -f /tmp/sysinfo/board_name ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "cudy,tr3600-v1" ] || exit 0
+
+# --- LAN management address ------------------------------------------------
+if uci -q get network.lan >/dev/null; then
+	uci -q set network.lan.ipaddr='10.0.0.1'
+	uci -q set network.lan.netmask='255.255.255.0'
+	uci -q commit network
+fi
+
+# --- hostname ---------------------------------------------------------------
+if uci -q get system.@system[0] >/dev/null; then
+	uci -q set system.@system[0].hostname='wrt'
+	uci -q commit system
+fi
+
+exit 0

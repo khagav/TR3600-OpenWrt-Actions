@@ -1,0 +1,20 @@
+## 3600wrt: IPv4 TTL clamp (tethering / carrier detection)
+##
+## Loaded automatically: firewall4 includes every /etc/nftables.d/*.nft file
+## inside "table inet fw4", before its own chains are declared.  Declaring a
+## separate base chain here keeps us independent of fw4 internals.
+##
+## mangle is priority -150, so -149 runs right after fw4's mangle_postrouting.
+## Everything that leaves towards a WAN (eth0, the USB tether netdev, VPN
+## tunnels ...) gets TTL 64, so a tethered 4G uplink sees a single hop instead
+## of "LAN clients + 1".  LAN egress is untouched.
+##
+## Disable with:  tr3600-ttl off     (moves this file away + fw4 reload)
+
+chain tr3600_ttl {
+	type filter hook postrouting priority -149; policy accept;
+
+	oifname "br-lan" return
+	oifname "lo" return
+	ip ttl set 64
+}

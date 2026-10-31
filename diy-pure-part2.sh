@@ -51,8 +51,8 @@ echo "========================================================"
 # 1. 預設 IP / 語言 / 主題
 # =========================================================
 
-# 預設 IP 從 192.168.1.1 改為 192.168.6.1
-sed -i 's/192.168.1.1/192.168.6.1/g' package/base-files/files/bin/config_generate
+# 預設 IP 從 192.168.1.1 改為 10.0.0.1
+sed -i 's/192.168.1.1/10.0.0.1/g' package/base-files/files/bin/config_generate
 
 # 主題：OpenWrt 原生 bootstrap。
 # config 裡已經有 CONFIG_DEFAULT_THEME=bootstrap + CONFIG_PACKAGE_default-settings，
