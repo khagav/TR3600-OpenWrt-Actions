@@ -1,0 +1,23 @@
+--- a/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
++++ b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
+@@ -266,8 +266,17 @@
+ 
+ &ssusb {
+ 	status = "okay";
++	/* Align with the stock Cudy DTB: keep the USB3 port masked off.
++	 * The SoC USB3 PHY (tphyu3port0) is the source of USB enumeration
++	 * instability on this board - stock leaves it disabled and sets
++	 * u3p-dis-msk=0x1, so the dongle rides the USB2 port only. */
++	mediatek,u3p-dis-msk = <0x1>;
+ };
+ 
++&tphyu2port0 {
++	status = "okay";
++};
++
+ &tphyu3port0 {
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ 
