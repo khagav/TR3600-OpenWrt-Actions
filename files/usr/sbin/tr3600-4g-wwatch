@@ -95,11 +95,23 @@ usb_power_cycle() {
 # is GONE - we walk /sys/bus/usb/devices, not /sys/class/net.  Root hubs
 # (busid contains ":") are skipped so we never kill a whole controller.
 usb_replug_all() {
-	local d busid found=0
+	local d busid vid found=0
 	for d in /sys/bus/usb/devices/*/idVendor; do
 		[ -f "$d" ] || continue
 		busid="$(basename "$(dirname "$d")")"
-		case "$busid" in *:*) continue ;; esac
+		# Only touch REAL USB devices (busid "1-1" / "2-1.1").  Root hubs
+		# are named usb1/usb2 (no dash) with idVendor 1d6b (Linux
+		# Foundation); interface nodes are "1-1:1.0" (has a colon).
+		# Unbinding a root hub resets the WHOLE controller and can hang
+		# the box -> 60s USB re-enumeration storm -> mtk-wdt reboot.
+		case "$busid" in
+			*:*) continue ;;
+			usb*) continue ;;
+			*-*) ;;
+			*) continue ;;
+		esac
+		vid="$(cat "/sys/bus/usb/devices/$busid/idVendor" 2>/dev/null)"
+		[ "$vid" = "1d6b" ] && continue
 		[ -w /sys/bus/usb/drivers/usb/unbind ] || return 1
 		echo "$busid" > /sys/bus/usb/drivers/usb/unbind 2>/dev/null
 		sleep 1
@@ -145,9 +157,13 @@ fix_tether_device() {
 		log "tether device -> $newdev (ifup)"
 		ifup tether >/dev/null 2>&1
 	else
-		log "no USB netdev; forcing USB re-enumeration"
+		# No real USB device to fix - do NOT touch the USB bus.  usb_replug_all
+		# would walk the root hubs (usb1/usb2) and reset the whole controller
+		# (the cause of the 60s re-enumeration storm + watchdog reboots).
+		# Only try the GPIO power cycle (harmless if the node is absent) and
+		# leave the bus alone; log so an operator can see the tether is gone.
+		log "no USB netdev; tether $tdev missing (bus untouched)"
 		usb_power_cycle
-		usb_replug_all
 	fi
 	return 1
 }
