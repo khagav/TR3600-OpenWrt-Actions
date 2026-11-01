@@ -7,7 +7,7 @@
 #
 # 這個腳本做三件事：
 #   1. 預設 IP / 語言 / 主題（bootstrap，OpenWrt 原生）
-#   2. 板級 DTS 修正 0001 / 0004 / 0005 / 0006 / 0007（風扇 + LED + WiFi MAC）
+#   2. 板級 DTS 修正 0001 / 0004 / 0005 / 0006 / 0007 / 0008（風扇 + LED + WiFi MAC + USB 穩定）
 #   3. mt76 backport 0002（STA_REC 先於 VoW，修 wifi down/up 後連不上）
 #   ＋ uci-defaults 兜底（語言 / 主題 / HWNAT 硬體流量卸載）
 #
@@ -147,10 +147,17 @@ apply_dts_patch 0006-tr3600-fan-thermal-curve 'cpu_trip_active_low: active-low {
 # 5. 風扇曲線調校：拿掉無效的 25% 段，改成 50/78/100%，
 #    整條曲線上移到 68/78/88 C，讓 64 C 的待機溫度真的落在停轉區
 apply_dts_patch 0007-tr3600-fan-curve-tune    'cooling-levels = <0 128 200 255>;'
+# 6. USB 穩定性：對齊原廠 Cudy DTB —— 屏蔽 u3 口（u3p-dis-msk=0x1）、
+#    啟用 USB2 PHY、禁用 SoC USB3 PHY（tphyu3port0）。soapmancn 錯誤啟用
+#    USB3 PHY 是 CMIOT ML307R 反復掉線/重枚舉的根因。marker 用 u3p-dis-msk。
+apply_dts_patch 0008-tr3600-usb-stability    'mediatek,u3p-dis-msk = <0x1>;'
 
 grep -qF 'pinctrl-0 = <&pwm_pins>;' "$DTS" || { echo "ERROR: pinctrl not fixed"; exit 1; }
 grep -qF 'temperature = <68000>;' "$DTS"   || { echo "ERROR: fan curve 0007 did not land"; exit 1; }
-echo "  OK: PWM0 fan / white+red LEDs / vendor MAC layout / 68-78-88 C fan curve"
+grep -qF 'mediatek,u3p-dis-msk = <0x1>;' "$DTS" || { echo "ERROR: USB stability 0008 did not land"; exit 1; }
+grep -qF '&tphyu3port0' "$DTS" && grep -A2 '&tphyu3port0' "$DTS" | grep -qF 'status = "disabled";' \
+	|| { echo "ERROR: USB3 PHY 0008 not disabled"; exit 1; }
+echo "  OK: PWM0 fan / white+red LEDs / vendor MAC layout / 68-78-88 C fan curve / USB stability (u3 masked, USB3 PHY off)"
 
 # =========================================================
 # 5. mt76 STA_REC / VoW 順序
