@@ -1,0 +1,108 @@
+#!/bin/sh
+# 4G 主路由一键切换脚本（用户插入 CMIOT ML307R dongle 后执行）
+# 用法: /usr/sbin/tr3600-4g-primary <verify|force>
+#   verify (默认): 检查 dongle 就绪 + 切到 4G 主路由 + 验证
+#   force: 跳过 dongle 就绪检查，直接切（用于 dongle 已插但检测不到时）
+#
+# 流程:
+#   1. 检测 USB netdev（huawei_cdc_ncm 生成的 wwan*/usb*）
+#   2. 若 dongle 在，re-point network.tether.device
+#   3. tr3600-wan set tether（4G 主 metric10 + eth0 备用 metric20，LAN=eth1）
+#   4. ifup tether + 验证 ifstatus tether up + 默认路由走 tether
+set -x
+LOG_TAG="tr3600-4g-primary"
+log() { logger -t "$LOG_TAG" "$1"; echo "[$LOG_TAG] $1"; }
+
+MODE="${1:-verify}"
+DEV="${2:-}"
+
+# ---- 1. 找到 USB netdev（排除 root hub / 无 USB 的） ----
+find_usb_netdev() {
+	for n in /sys/class/net/*; do
+		name="$(basename "$n")"
+		case "$name" in
+			lo|br-*|eth0|eth1|teql*|dummy*|sit*|ip6tnl*) continue ;;
+		esac
+		# 找父级 idVendor（USB 设备特征）
+		d="$(readlink -f "$n/device" 2>/dev/null)"
+		while [ -n "$d" ] && [ "$d" != "/" ]; do
+			if [ -f "$d/idVendor" ]; then
+				echo "$name"
+				return 0
+			fi
+			d="$(dirname "$d")"
+		done
+	done
+	return 1
+}
+
+# ---- 2. 若指定 DEV，用指定设备 ----
+if [ -n "$DEV" ]; then
+	ND="$DEV"
+else
+	ND="$(find_usb_netdev)"
+fi
+
+if [ -z "$ND" ]; then
+	if [ "$MODE" = "force" ]; then
+		log "警告: 未检测到 USB netdev，force 模式继续（可能 tether.device 已配好）"
+		ND="$(uci -q get network.tether.device)"
+		[ -z "$ND" ] && { log "错误: tether.device 未配置"; exit 1; }
+	else
+		log "错误: 未检测到 USB netdev（dongle 未插入或驱动未加载）。请插入 CMIOT ML307R 后重试。"
+		log "当前 netdev: $(ls /sys/class/net/ 2>/dev/null | tr '\n' ' ')"
+		exit 1
+	fi
+fi
+
+log "检测到 USB netdev: $ND"
+
+# ---- 3. re-point tether.device ----
+CUR="$(uci -q get network.tether.device)"
+if [ "$CUR" != "$ND" ]; then
+	log "tether.device $CUR -> $ND"
+	uci -q set "network.tether.device=$ND"
+	uci -q commit network
+else
+	log "tether.device 已是 $ND"
+fi
+
+# ---- 4. 切换 4G 主路由 ----
+log "执行 tr3600-wan set tether..."
+/usr/sbin/tr3600-wan set tether 2>&1 | while read -r l; do log "$l"; done
+RC=$?
+if [ $RC -ne 0 ]; then
+	log "错误: tr3600-wan set tether 失败 (exit $RC)"
+	exit $RC
+fi
+
+# ---- 5. ifup tether（确保拨号） ----
+log "ifup tether..."
+ifup tether >/dev/null 2>&1
+sleep 8
+
+# ---- 6. 验证 ----
+log "===== 验证 ====="
+log "tether 状态: $(ifstatus tether 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || echo '?')"
+log "tether.device: $(uci -q get network.tether.device)"
+log "wan.device: $(uci -q get network.wan.device)  wan.metric: $(uci -q get network.wan.metric)"
+log "tether.metric: $(uci -q get network.tether.metric)"
+log "br-lan ports: $(uci -q get network.@device[0].ports 2>/dev/null || uci -q get network.@device[0].name)"
+log "默认路由:"
+ip route 2>/dev/null | grep default | while read -r r; do log "  $r"; done
+
+# 检查 tether up
+UP="$(ifstatus tether 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)"
+if [ "$UP" = "true" ]; then
+	log "✅ 4G 主路由已启用，tether 已 up"
+	# 检查公网
+	if ping -c2 -W3 8.8.8.8 >/dev/null 2>&1; then
+		log "✅ 公网可达 (ping 8.8.8.8 OK)"
+	else
+		log "⚠️ tether up 但 ping 8.8.8.8 失败（可能 dongle 未拨号成功，wwatch 会重试）"
+	fi
+	exit 0
+else
+	log "⚠️ tether 未 up（dongle 可能还没拨号，wwatch 每分钟会重试）"
+	exit 2
+fi
