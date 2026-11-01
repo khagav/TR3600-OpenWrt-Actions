@@ -1,0 +1,13 @@
+{
+	"luci-app-tr3600-mac": {
+		"description": "Grant access to TR3600 MAC tool (tr3600-mac)",
+		"read": {
+			"file": { "/usr/sbin/tr3600-mac": [ "exec" ] },
+			"uci": [ "network", "wireless" ]
+		},
+		"write": {
+			"file": { "/usr/sbin/tr3600-mac": [ "exec" ] },
+			"uci": [ "network", "wireless" ]
+		}
+	}
+}

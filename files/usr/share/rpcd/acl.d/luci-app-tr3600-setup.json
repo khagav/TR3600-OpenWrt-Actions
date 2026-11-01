@@ -1,0 +1,12 @@
+{
+	"luci-app-tr3600-setup": {
+		"description": "Grant access to TR3600 setup wizard (tr3600-setup)",
+		"read": {
+			"uci": [ "tr3600" ],
+			"file": { "/usr/sbin/tr3600-wan": [ "exec" ] }
+		},
+		"write": {
+			"uci": [ "tr3600" ]
+		}
+	}
+}

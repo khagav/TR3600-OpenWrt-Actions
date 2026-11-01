@@ -1,0 +1,13 @@
+{
+	"luci-app-tr3600-wan": {
+		"description": "Grant access to TR3600 WAN selector (tr3600-wan)",
+		"read": {
+			"file": { "/usr/sbin/tr3600-wan": [ "exec" ] },
+			"uci": [ "network" ]
+		},
+		"write": {
+			"file": { "/usr/sbin/tr3600-wan": [ "exec" ] },
+			"uci": [ "network" ]
+		}
+	}
+}
