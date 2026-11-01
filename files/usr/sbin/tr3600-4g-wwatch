@@ -35,9 +35,14 @@ log() { logger -t tr3600-wwatch "$*"; }
 # Read each key explicitly (uci show+-n is not a portable combo; explicit get
 # also fails safe back to the defaults below if the section is absent).
 enabled="$(uci -q get tr3600.wwatch.enabled 2>/dev/null)";  enabled="${enabled:-1}"
-thresh="$(uci -q get  tr3600.wwatch.thresh 2>/dev/null)";   thresh="${thresh:-2}"
+thresh="$(uci -q get  tr3600.wwatch.thresh 2>/dev/null)";   thresh="${thresh:-3}"
 target="$(uci -q get  tr3600.wwatch.target 2>/dev/null)";   target="${target:-223.5.5.5 8.8.8.8}"
 allow_reboot="$(uci -q get tr3600.wwatch.allow_reboot 2>/dev/null)"; allow_reboot="${allow_reboot:-0}"
+# Seconds to hold the fail counter at 0 once tether is up, so a routed-mode
+# cellular dongle has time to finish its PPP dial before we start counting
+# it as offline.  Default 120 s; a cold dial on a congested cell can take
+# longer, so keep this comfortably above the udhcpc retry interval.
+dial_grace="$(uci -q get tr3600.wwatch.dial_grace 2>/dev/null)"; dial_grace="${dial_grace:-120}"
 [ "$enabled" = "1" ] || exit 0
 
 # ---- helpers ---------------------------------------------------------------
@@ -175,6 +180,45 @@ if ping_ok; then
 	rm -f "$B/fail" "$B/phase" 2>/dev/null
 	: > "$B/alive" 2>/dev/null
 	exit 0
+fi
+
+# A USB cellular dongle (e.g. the CMIOT ML307R) that works in routed mode
+# gives the router a DHCP lease (192.168.0.100) as soon as its internal
+# Ethernet NIC enumerates, but the CELLULAR side (the actual PPP dial to the
+# carrier) takes 30-120 s to come up.  During that window ping_ok() is false
+# even though everything is fine and will be fine.  If we let the fail
+# counter climb to thresh (default 2, ~2 min) and then escalate to phase 2
+# (USB re-enumerate) we *kill a perfectly good dongle* -- exactly what
+# happened on the live box: cdc_ether eth2 registered, DHCP lease obtained,
+# then wwatch phase2 tore the USB device down (can't set config, -71) and it
+# never recovered.
+#
+# So: while the tether device node EXISTS (the dongle enumerated fine and
+# netifd owns it), treat a ping failure as a *dial / cellular* problem, not a
+# USB problem.  Give the cellular side a grace window, then only restart the
+# tether interface (phase 1) to re-trigger the dial; NEVER re-enumerate the
+# USB device (phase 2) while the device node is present.
+#
+# The grace window starts when tether is up (has an address).  While the
+# window is open the fail counter is held at 0 so phase 1 is not reached.
+# After the window, if the cellular side still cannot reach the internet we
+# climb phase 1 (tether bounce) -- still cheap and non-destructive.
+tether_state="$(ifstatus tether 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)"
+if [ "$tether_state" = "true" ]; then
+	if [ ! -f "$B/tether_up_since" ]; then
+		date +%s > "$B/tether_up_since" 2>/dev/null
+		log "tether is up; dial grace window started"
+	fi
+	up_since="$(cat "$B/tether_up_since" 2>/dev/null || echo 0)"
+	now="$(date +%s 2>/dev/null || echo 0)"
+	# hold the fail counter at 0 during the dial grace window
+	if [ "$up_since" -gt 0 ] && [ $(( now - up_since )) -lt "$dial_grace" ]; then
+		rm -f "$B/fail" "$B/phase" 2>/dev/null
+		log "tether dialing (up $(($(date +%s 2>/dev/null || echo 0) - up_since))s < grace $dial_grace s); holding"
+		exit 0
+	fi
+else
+	rm -f "$B/tether_up_since" 2>/dev/null
 fi
 
 f=$(( $(cat "$B/fail" 2>/dev/null || echo 0) + 1 ))
