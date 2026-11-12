@@ -46,45 +46,37 @@ echo " repo root : $REPO_ROOT"
 echo "========================================================"
 
 # =========================================================
-# 第三方 feed（mosdns / ddns-go / webdav）
+# 第三方 feed：**不追加**（2026-11-12 Lite）
 # =========================================================
-# 這三個官方 feed 都沒有（實測：apk 索引 + 上游倉庫都查不到）：
-#   mosdns     ← sbwml/luci-app-mosdns
-#   ddns-go    ← sirpdboy/luci-app-ddns-go
-#   webdav     ← 只有聚合 feed 有
-#   （passwall2 已於 2026-10-31 依使用者要求移除，見 config）
+# 這裡以前會把 kenzok8/openwrt-packages + kenzok8/small-package 追加到
+# feeds.conf.default，只為了 mosdns / ddns-go / webdav 三個套件。
+# Lite 版把這三個套件都砍了（見 config 檔頭），所以第三方 feed 整個移除。
 #
-# 這裡用中文圈最通用的 kenzok8 兩個 feed（openwrt-packages + small-package），
-# 它們同時提供上面三個。用單一來源的理由：避免同一個套件被兩個 feed 重複
-# 定義 —— 那會讓 make defconfig 直接報 duplicate package。
+# 為什麼這是穩定性收益，不只是「少下載」：
+#   * kenzok8 的聚合 feed 跟官方 feed 有同名套件（aria2 等），
+#     scripts/feeds install -a 會撞 duplicate，行為隨上游漂移；
+#   * 第三方 feed 常常直接改 Makefile 依賴，oldconfig 會把符號吃掉，
+#     變成「編過了但功能不在」或「必需包斷言失敗」；
+#   * 這條建置線以前就是死在 feed 相關問題上（liangcanming 倉庫 404、
+#     kenzok8 feed 拉不下來、duplicate package）。
 #
-# ⚠️ 這是本建置線唯一的外部依賴。kenzok8 很活躍（2026-10-13 當天還有更新），
-#    但第三方 feed 本質上會漂移 —— 之前 liangcanming 的風扇倉庫整個 404
-#    就是這個風險。退路：把下面追加的兩行註解掉，並在 config 裡把
-#    luci-app-mosdns / -ddns-go / -webdav 改成 not set。
+# 現在唯一的套件來源 = OpenWrt 官方 feed + 本倉庫 vendor/。
+# 如果哪天要加回來：把下面兩行註解打開，並在 config 裡把對應套件設成 =y。
+#   src-git kenzok8 https://github.com/kenzok8/openwrt-packages.git
+#   src-git small https://github.com/kenzok8/small-package.git
 FEEDS_CONF=feeds.conf.default
 if [ ! -f "$FEEDS_CONF" ]; then
 	echo "ERROR: 找不到 $FEEDS_CONF（cwd 應該在 openwrt 根目錄）"
 	exit 1
 fi
 
-if grep -q 'kenzok8/small-package' "$FEEDS_CONF"; then
-	echo "[tr3600-pure] 第三方 feed 已經在了，跳過"
-else
-	cat >> "$FEEDS_CONF" <<'EOF'
-
-# ---- TR3600 build: 第三方 feed（mosdns / ddns-go / webdav）----
-src-git kenzok8 https://github.com/kenzok8/openwrt-packages.git
-src-git small https://github.com/kenzok8/small-package.git
-EOF
-	echo "[tr3600-pure] 已追加第三方 feed: kenzok8/openwrt-packages + kenzok8/small-package"
-fi
-
-if ! grep -q 'kenzok8/openwrt-packages' "$FEEDS_CONF"; then
-	echo "ERROR: feeds.conf.default 沒有寫入第三方 feed"
+# 防呆：如果有人（或舊分支）把第三方 feed 寫回去，這裡直接報出來，
+# 不要讓它默默影響建置結果。
+if grep -q 'kenzok8' "$FEEDS_CONF"; then
+	echo "ERROR: feeds.conf.default 裡有 kenzok8 第三方 feed，Lite 版不允許（見上方說明）"
 	exit 1
 fi
-echo "[tr3600-pure] feeds.conf.default 第三方 feed 就位"
+echo "[tr3600-pure] feeds.conf.default 只有官方 feed（無第三方）"
 
 mkdir -p package/custom
 

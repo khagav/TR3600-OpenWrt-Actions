@@ -1,0 +1,48 @@
+--- a/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
++++ b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
+@@ -21,7 +21,13 @@
+ 	};
+ 
+ 	chosen {
+-		bootargs = "console=ttyS0,115200n1 earlycon=uart8250,mmio32,0x11000000 pci=pcie_bus_perf";
++		/* pci=noaer: the MT7990 PCIe link on this board can emit AER
++		 * "synchronous external abort" storms, and every abort is a DMA
++		 * transaction that may already have been lost - the recovery path
++		 * ends in a panic. Reporting buys nothing here, so stop reporting
++		 * (same reasoning as disabling WED below).
++		 */
++		bootargs = "console=ttyS0,115200n1 earlycon=uart8250,mmio32,0x11000000 pci=pcie_bus_perf pci=noaer";
+ 		stdout-path = "serial0:115200n8";
+ 	};
+ 
+@@ -31,6 +37,30 @@
+ 		reg = <0 0x40000000 0 0x20000000>;
+ 	};
+ 
++	/* pstore/ramoops.
++	 *
++	 * The old firmware and our earlier builds left /sys/fs/pstore empty
++	 * after every unexplained reboot, because nothing in the DTS told the
++	 * kernel where to keep a panic. Put a 1 MiB region in the last MiB of
++	 * the 512 MiB DRAM window; reserved-memory keeps the allocator out of
++	 * it, so a warm reset still has the previous boot's console + panic.
++	 */
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		ramoops@5ff00000 {
++			compatible = "ramoops";
++			reg = <0 0x5ff00000 0 0x00100000>;
++			record-size = <0x00020000>;
++			console-size = <0x00040000>;
++			pmsg-size = <0x00020000>;
++			ftrace-size = <0x00020000>;
++			ecc-size = <0>;
++		};
++	};
++
+ 	gpio-leds {
+ 		compatible = "gpio-leds";
+ 

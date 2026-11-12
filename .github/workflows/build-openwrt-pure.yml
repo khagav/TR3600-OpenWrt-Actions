@@ -5,9 +5,18 @@ name: Build Cudy TR3600 OpenWrt Pure
 #
 # 2026-10-13：iStore 應用商店已移除（連同 linkease/istore feed 與其依賴），
 #   iStore 版建置線整個退休。主題用 OpenWrt 原生 bootstrap。
-#   第一輪是「只裝智能風扇」的精簡版；同日晚間第二輪按使用者要求加回
-#   VPN / 組網 / 代理 / 下載 / 共享 / DDNS 一整組（見守門機制第 7、8 條）。
-#   仍然沒有：iStore / OpenClash / SSR+ / smartdns / 第三方主題 / 工具類外掛。
+#   第一輪是「只裝智能風扇」的精簡版；同日晚間第二輪加回 VPN / 組網 / 代理 /
+#   下載 / 共享 / DDNS 一整組。
+#
+# 2026-11-12（Lite 重建）：實機連續自動重啟、pstore 查不到 panic 之後，這條線
+#   退回「穩定優先」：砍掉全部常駐用戶態應用（zerotier / openvpn / mosdns /
+#   aria2 / samba4 / webdav / ddns-scripts / ddns-go / minidlna / stubby /
+#   miniupnpd），只留 tailscale + wireguard；同時**移除第三方 feed（kenzok8）**，
+#   建置線只依賴 OpenWrt 官方 feed。另加 3 條穩定化措施：
+#     * 刪掉 tr3600-4g-wwatch 看門狗（無 dongle 時每分鐘強制 USB 重插）
+#     * 刪掉 04:30 每日定時重啟 cron（把真崩潰蓋掉了）
+#     * pci=noaer + RAM 末端 1 MiB ramoops（讓下次 panic 留得下來）
+#   WED 同時在 /etc/modprobe.d/mt7996e.conf 明確關閉。
 #
 # 基底： openwrt-25.12 + Cudy TR3600 v1 板级支援（上游 PR #24596，尚未合併）
 #        實際 clone 來源見下面的 env.REPO_URL（編譯必需，非品牌標記）
@@ -18,6 +27,8 @@ name: Build Cudy TR3600 OpenWrt Pure
 #        patches/0005-tr3600-wifi-mac-layout.patch   (WiFi MAC: 2.4G=base+0, 5G=base+0x10)
 #        patches/0006-tr3600-fan-thermal-curve.patch (溫控: 60C 以下停轉, 65/75/85 三段)
 #        patches/0007-tr3600-fan-curve-tune.patch    (風扇曲線調校: 50/78/100%, 68/78/88C)
+#        patches/0008-tr3600-usb-stability.patch    (USB3 端口屏蔽 + USB3 PHY 關閉)
+#        patches/0009-tr3600-noaer-ramoops.patch    (bootargs pci=noaer + ramoops 1 MiB)
 #
 # 已下線： patches/0008-luci-tr3600-fan-smart-suggestions.patch
 #        （風扇頁智能季節建議）—— 2026-10-13 移除，補丁留在 retired/patches/。
@@ -25,7 +36,7 @@ name: Build Cudy TR3600 OpenWrt Pure
 #        日曆 + 待機基準），只是多一層會壞的東西，還讓 UI 變得難懂。
 #        風扇頁現在只有 auto / manual 兩種模式。
 # 設定： mt7987-cudy-tr3600-pure.config
-# 性能： sysctl fq + BBR、TCP 緩衝區加大、HWNAT 硬體流量卸載、WED 無線卸載
+# 性能： sysctl fq + BBR、TCP 緩衝區加大、HWNAT 硬體流量卸載、WED 明確關閉（穩定優先）
 #
 # 守門機制（一個都不少）：
 #   1. Clone 後印出實際 HEAD SHA 並與 REPO_COMMIT 比對（只警告、不中斷）。
@@ -48,18 +59,24 @@ name: Build Cudy TR3600 OpenWrt Pure
 #          **不能**放 /etc/sysctl.conf，那是 conffile，被 sysupgrade 保留會蓋掉新映像的。
 #      part1 之後先確認兩份檔案就位，編譯後再從 build_dir 的 staging rootfs 複查成品。
 #   7. oldconfig 之後斷言必需包仍為 =y：kmod-sched（sch_fq）、wpad-mbedtls（802.11r/k/v）、
-#      USB 儲存/網卡/共享，以及第二輪加回來的 VPN / 代理 / 下載 / 共享 / DDNS
-#      （zerotier / tailscale / kmod-wireguard / openvpn / passwall2 / aria2 /
-#        samba4 / luci-app-ddns / mosdns / ddns-go / webdav），並確認
-#      wpad-basic-mbedtls 已被換掉。feed 裡沒有 kmod，事後補不了，只能編譯期保證。
-#      **daemon 也要斷言，不只 LuCI 前端**（ddns-go / mosdns / rpcd-mod-wireguard /
-#      openvpn-easy-rsa / passwall2 的 Xray 核心）—— 否則「菜單在、點進去空的」。
-#   8. 第三方 feed：passwall2 / mosdns / ddns-go / webdav 官方 feed 都沒有，
-#      由 diy-pure-part1.sh 把 kenzok8 兩個 feed 追加進 feeds.conf.default。
-#      part1 之後斷言那兩行確實在，否則「必須 =y」清單會整批 MISS。
+#      USB 儲存/網卡/共享，以及 Lite 版留下的組網套件（tailscale / kmod-wireguard）。
+#      並確認 wpad-basic-mbedtls 已被換掉。feed 裡沒有 kmod，事後補不了，
+#      只能編譯期保證。
+#      **daemon 也要斷言，不只 LuCI 前端**（rpcd-mod-wireguard）——
+#      否則「菜單在、點進去空的」。
+#      同時反向斷言：被砍掉的應用（aria2 / samba4 / mosdns / openvpn / ddns /
+#      minidlna / stubby / miniupnpd / zerotier）**不准**偷偷回到 .config。
+#   8. 第三方 feed：Lite 版**一個都不要**。part1 之後斷言 feeds.conf.default
+#      裡沒有 kenzok8；有就失敗。這條以前是反向的（要求那兩行存在），
+#      現在改成防呆，免得老分支的設定被默默帶進來。
 # =============================================================================
 
 on:
+  # 2026-11-12: 加 push 觸發，讓「改 config/patches → 推送 → 自動出固件」不用再
+  # 依賴手動 workflow_dispatch（本機的 gh 沒有 token，dispatch 走不通）。
+  # 只認 main 分支；workflow 自己 push 的 tag 不會回頭再觸發一次。
+  push:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       ssh:
@@ -70,7 +87,7 @@ on:
 env:
   DEVICE_NAME: Cudy-TR3600
   DEVICE_MODEL: Cudy TR3600
-  FIRMWARE_PREFIX: Cudy-TR3600-Pure
+  FIRMWARE_PREFIX: Cudy-TR3600-Lite
   # 上游原始碼位置。編譯必需，但它是「實作細節」不是品牌：
   # 所有對外輸出（release tag / 標題 / 說明 / README）都不再引用這個名字。
   REPO_URL: https://github.com/soapmancn/openwrt
@@ -199,26 +216,21 @@ jobs:
         fi
         echo "✅ 风扇页精简：只有 auto / manual，无季节机制"
 
-        # ---- 第三方 feed（passwall2 / mosdns / ddns-go / webdav）----
-        # 这四个官方 feed 都没有（实测 apk 索引 + 上游仓库都查不到）。
-        # diy-pure-part1.sh 会把 kenzok8 的两个 feed 追加到 feeds.conf.default。
-        # 少了它们，下一步 feeds install 找不到包，oldconfig 会把
-        # CONFIG_PACKAGE_luci-app-* 吃掉 —— 与其等到最后「必须 =y」清单报错，
-        # 不如在这里就说清楚原因。
+        # ---- 第三方 feed：Lite 版不允许存在 ----
+        # 2026-11-12 起，这条检查是**反向**的：以前要求 kenzok8 两个 feed 存在
+        # （为了 mosdns / ddns-go / webdav），现在这三个套件都砍了，第三方 feed
+        # 必须一行都没有。若老分支的 feeds.conf.default 被带进来，这里立刻失败，
+        # 而不是让 duplicate package / oldconfig 吃符号在半小时后才爆。
         FEEDSCONF=feeds.conf.default
         if [ ! -f "$FEEDSCONF" ]; then
           echo "::error title=找不到 feeds.conf.default::cwd 应该已经在 openwrt 根目录"; exit 1
         fi
-        for f in 'kenzok8/openwrt-packages' 'kenzok8/small-package'; do
-          if grep -q "$f" "$FEEDSCONF"; then
-            echo "  [OK] 第三方 feed: $f"
-          else
-            echo "::error title=第三方 feed 缺失::feeds.conf.default 里没有 $f（passwall2/mosdns/ddns-go/webdav 会装不上）"
-            cat "$FEEDSCONF"
-            exit 1
-          fi
-        done
-        echo "✅ 第三方 feed 就位（passwall2 / mosdns / ddns-go / webdav）"
+        if grep -q 'kenzok8' "$FEEDSCONF"; then
+          echo "::error title=出现第三方 feed::Lite 版只允许 OpenWrt 官方 feed，但 feeds.conf.default 里有 kenzok8"
+          cat "$FEEDSCONF"
+          exit 1
+        fi
+        echo "✅ 只有 OpenWrt 官方 feed（无第三方）"
 
         # ---- 模块名：智能风扇（2026-10-13 改名） ----
         # menu.d 的 title 与页面 h2 用同一个字面量「智能风扇」，po 目录里也有
@@ -295,7 +307,7 @@ jobs:
     - name: Update & Install Feeds
       run: |
         cd openwrt
-        # 第三方 feed（kenzok8 两个）是 diy-pure-part1.sh 追加进 feeds.conf.default 的。
+        # 2026-11-12 Lite：只用 OpenWrt 官方 feed（第三方 feed 已移除）。
         # 网络抖动会让 feeds update 失败，所以重试 3 次再放弃。
         ok=0
         for i in 1 2 3; do
@@ -304,22 +316,11 @@ jobs:
           sleep 15
         done
         if [ "$ok" != "1" ]; then
-          echo "::error title=feeds update 失败::第三方 feed 拉不下来（kenzok8/openwrt-packages 或 small-package）"
+          echo "::error title=feeds update 失败::官方 feed 拉不下来（网络问题，重试 3 次仍失败）"
           exit 1
         fi
-        # install -a 会把所有 feed 的套件都 link 进 package/feeds/。
-        # kenzok8 的聚合 feed 跟官方 feed 有同名套件（例如 aria2），
-        # scripts/feeds 自己会跳过并印 WARNING —— 那是预期行为，不是错误。
+        # 只有官方 feed，不会有同名套件冲突；install -a 之后的 WARNING 才值得看。
         ./scripts/feeds install -a
-        echo "==== 第三方套件是否真的 link 进来了 ===="
-        for p in luci-app-mosdns luci-app-ddns-go luci-app-webdav; do
-          d=$(ls -d package/feeds/*/"$p" 2>/dev/null | head -1)
-          if [ -n "$d" ]; then
-            echo "  [OK] $p -> $d"
-          else
-            echo "::warning title=第三方套件没进 package/feeds::$p 找不到，oldconfig 会把它吃掉（最后「必须 =y」清单会失败）"
-          fi
-        done
 
     # =========================================================
     # 6. 执行 DIY 脚本 (diy-pure-part2.sh)
@@ -369,9 +370,9 @@ jobs:
         echo "==== fan config check ===="
         grep -E "luci-app-tr3600-fan|luci-theme-bootstrap|CONFIG_DEFAULT_THEME" .config
         echo "============================"
-        # 精简版：商店 / 主题类插件一个都不该出现
-        # ⚠️ 2026-10-13 第二轮：passwall2 / mosdns / tailscale 已改为**要装**，
-        #    所以从「不该出现」名单里拿掉（它们由下面的「必须 =y」清单接管）。
+        # Lite 版：商店 / 主题类插件一个都不该出现
+        # ⚠️ 2026-11-12：passwall2 / mosdns 这一批已经整组砍掉，不再「要装」，
+        #    它们由下面的「不许出现的包」反向断言单独检查。
         echo "==== 应为空（不该出现的插件）===="
         grep -E "CONFIG_PACKAGE_(luci-app-store|luci-app-passwall|luci-app-openclash|luci-app-ssr-plus|luci-theme-argon|luci-theme-aurora|luci-theme-kucat|luci-app-smartdns|luci-app-openlist|luci-app-ttyd|luci-app-filemanager|luci-app-authshield)=y" .config \
           && { echo "::error title=混入非预期插件::上面这些插件不该出现在 config 里"; exit 1; } \
@@ -379,19 +380,17 @@ jobs:
         echo "========================================"
 
         # ---- 必须存在的包（oldconfig 之后仍为 y）----
-        # 这些是 2026-10-13 补的：fq 排程、完整 wpad、USB 存储/网卡/共享，
-        # 以及第二轮加回来的 VPN / 代理 / 下载 / 共享 / DDNS。
+        # 2026-11-12 Lite：清单按「路由器本职」收缩。
+        #   留下：fq 排程、完整 wpad、USB 存储/网卡（USB-LAN / 4G dongle 要用）、
+        #         IPv6、组网（tailscale / wireguard）。
+        #   砍掉：zerotier / openvpn / aria2 / samba4 / ddns / mosdns / minidlna /
+        #         stubby / miniupnpd —— 它们不再编进固件，断言也要跟着删。
         # 少了任何一个都会在设备上表现为「功能不存在」，而且 feed 里没有 kmod
         # 可以事后补装 —— 只能在编译期保证。
-        # 第三方 feed 那四个（passwall2 / mosdns / ddns-go / webdav）如果 feed
-        # 没拉下来，oldconfig 会把符号吃掉，这里就会 MISS 并直接失败。
         #
-        # ⚠️ 2026-10-13 补：**同时断言 daemon，不只断言 LuCI 前端**。
-        #   luci-app-ddns-go 的 LUCI_DEPENDS 是 `+ddns-go`，luci-app-mosdns 是
-        #   `+mosdns +uclient-fetch +v2ray-geoip +v2ray-geosite +geo2txt +ucode`
-        #   （已从 kenzok8/small-package 的 Makefile 实查）。只断言前端的话，
-        #   万一依赖名写错或 feed 缺包，会出现「菜单在、点进去空的」——
-        #   前端装上了、daemon 没装上，而且这里一声不响。
+        # ⚠️ **同时断言 daemon，不只断言 LuCI 前端**。只断言前端的话，万一依赖
+        #   名写错或 feed 缺包，会出现「菜单在、点进去空的」—— 前端装上了、
+        #   daemon 没装上，而且这里一声不响。
         echo "==== 必须 =y 的包 ===="
         MISSING=""
         for sym in \
@@ -409,32 +408,15 @@ jobs:
           CONFIG_PACKAGE_kmod-usb-net-rndis \
           CONFIG_PACKAGE_kmod-usb-net-cdc-ncm \
           CONFIG_PACKAGE_kmod-usb-net-ipheth \
-          CONFIG_PACKAGE_zerotier \
           CONFIG_PACKAGE_tailscale \
           CONFIG_PACKAGE_luci-app-tailscale-community \
           CONFIG_PACKAGE_kmod-wireguard \
           CONFIG_PACKAGE_wireguard-tools \
           CONFIG_PACKAGE_luci-proto-wireguard \
-          CONFIG_PACKAGE_openvpn-openssl \
-          CONFIG_PACKAGE_luci-app-openvpn \
-          CONFIG_PACKAGE_aria2 \
-          CONFIG_PACKAGE_luci-app-aria2 \
-          CONFIG_PACKAGE_samba4-server \
-          CONFIG_PACKAGE_luci-app-samba4 \
-          CONFIG_PACKAGE_ddns-scripts \
-          CONFIG_PACKAGE_luci-app-ddns \
-          CONFIG_PACKAGE_luci-app-mosdns \
-          CONFIG_PACKAGE_odhcpd-ipv6only \
-          CONFIG_PACKAGE_minidlna \
-          CONFIG_PACKAGE_luci-app-minidlna \
-          CONFIG_PACKAGE_stubby \
-          CONFIG_PACKAGE_miniupnpd-nftables \
-          CONFIG_PACKAGE_luci-app-ddns-go \
-          CONFIG_PACKAGE_luci-app-webdav \
-          CONFIG_PACKAGE_ddns-go \
-          CONFIG_PACKAGE_mosdns \
           CONFIG_PACKAGE_rpcd-mod-wireguard \
-          CONFIG_PACKAGE_openvpn-easy-rsa \
+          CONFIG_PACKAGE_odhcpd-ipv6only \
+          CONFIG_PACKAGE_luci-app-tr3600-fan \
+          CONFIG_PACKAGE_default-settings \
         ; do
           if grep -q "^${sym}=y" .config; then
             echo "  [OK] $sym"
@@ -452,7 +434,27 @@ jobs:
           echo "::error title=wpad 没换::wpad-basic-mbedtls 仍为 =y，缺 802.11r/k/v 与 WPS"
           exit 1
         fi
-        echo "✅ 必需包齐全（40 项：fq 排程 / wpad-mbedtls / USB / VPN / samba4 / DDNS，含 daemon）"
+        echo "✅ 必需包齐全（23 项：fq 排程 / wpad-mbedtls / USB / IPv6 / tailscale / wireguard / 风扇）"
+
+        # ---- 反向断言：Lite 砍掉的包不许回来 ----
+        # oldconfig 会把 =y 变成 not set 或反之，也可能被某个默认包重新拖进来。
+        # 这些套件全是常驻用户态服务，回到固件里就等于这次重建白做。
+        echo "==== 不许出现的包 ===="
+        CAME_BACK=""
+        for pkg in aria2 samba4-server mosdns ddns-go openvpn-openssl zerotier \
+                   minidlna stubby miniupnpd-nftables luci-app-mosdns \
+                   luci-app-ddns-go luci-app-webdav luci-app-samba4 \
+                   luci-app-openvpn luci-app-ddns luci-app-minidlna; do
+          if grep -q "^CONFIG_PACKAGE_${pkg}=y" .config; then
+            echo "  [BACK] CONFIG_PACKAGE_${pkg}=y"
+            CAME_BACK="$CAME_BACK $pkg"
+          fi
+        done
+        if [ -n "$CAME_BACK" ]; then
+          echo "::error title=砍掉的包又回来了::Lite 版不该包含:$CAME_BACK"
+          exit 1
+        fi
+        echo "✅ 已砍套件确认不在 config 里（16 项）"
         echo "========================================"
 
     # =========================================================
@@ -524,14 +526,18 @@ jobs:
       run: |
         cd openwrt
 
-        echo "🔨 开始编译... ($(nproc) 线程)"
+        echo "🔨 开始编译... (分步：-j2 → -j1)"
 
-        if make -j"$(nproc)"; then
-          echo "✅ 多线程编译成功"
+        # 2026-11-12: 以前用 make -j"$(nproc)"（标准 runner 4 vCPU / 16 GB）。
+        # 上一轮就是这么被 OOM 杀掉整个 make 的：日志停在 package/install
+        # 中间，一声不响。这里改成**固定 -j2**，宁可慢 30 分钟也不要半路
+        # 被内核 OOM killer 拿走；仍然失败才退到 -j1。
+        if make -j2; then
+          echo "✅ -j2 编译成功"
         elif make -j1; then
-          echo "✅ 单线程编译成功"
+          echo "✅ -j1 编译成功"
         elif make -j1 V=s; then
-          echo "✅ 单线程详细日志编译成功"
+          echo "✅ -j1 V=s 编译成功"
         else
           echo "❌ 编译失败"
           exit 1
@@ -725,6 +731,42 @@ jobs:
             echo "::error title=找不到固件里的 sysctl 调校::files/ overlay 可能没被复制进 rootfs"
             exit 1
           fi
+
+          echo
+          echo "=== 稳定性（2026-11-12 Lite）：wwatch 必须不在 / wed_enable=0 必须在 ==="
+          # 1) 4G 看门狗已从仓库删除，成品里不该有它的任何痕迹。
+          WW=$(find openwrt/build_dir -path '*root-*/usr/sbin/tr3600-4g-wwatch' 2>/dev/null)
+          WI=$(find openwrt/build_dir -path '*root-*/etc/init.d/tr3600-4g-wwatch' 2>/dev/null)
+          if [ -n "$WW$WI" ]; then
+            echo "  [FAIL] 成品里还有 wwatch: $WW $WI"
+            exit 1
+          fi
+          echo "  [OK] tr3600-4g-wwatch 不在成品里（脚本 + init.d 都没有）"
+          # 2) WED 必须被 modprobe.d 明确关掉。
+          FOUND_MOD=0
+          for f in $(find openwrt/build_dir -path '*root-*/etc/modprobe.d/mt7996e.conf' 2>/dev/null); do
+            FOUND_MOD=1
+            echo "  -- $f"
+            cat "$f" | sed 's/^/     /'
+            grep -q 'wed_enable=0' "$f" || { echo "  [FAIL] 没有 wed_enable=0"; exit 1; }
+            echo "  [OK] wed_enable=0"
+          done
+          [ "$FOUND_MOD" -eq 1 ] || { echo "  [FAIL] 成品里没有 /etc/modprobe.d/mt7996e.conf"; exit 1; }
+          # 3) 定时重启不许回来。
+          for f in $(find openwrt/build_dir -path '*root-*/etc/crontabs/root' 2>/dev/null); do
+            if grep -q 'reboot' "$f"; then
+              echo "  [FAIL] crontab 里还有 reboot: $(grep reboot "$f")"
+              exit 1
+            fi
+            echo "  [OK] crontab 无 reboot"
+          done
+          echo "  [OK] 无每日定时重启 cron"
+          # 4) DTS 的 noaer / ramoops 断言（patch 之后再看一遍，防止被后续 patch 盖掉）。
+          grep -qF 'pci=noaer' openwrt/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts \
+            || { echo "  [FAIL] DTS bootargs 没有 pci=noaer"; exit 1; }
+          grep -qF 'compatible = "ramoops";' openwrt/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts \
+            || { echo "  [FAIL] DTS 没有 ramoops 节点"; exit 1; }
+          echo "  [OK] DTS: pci=noaer + ramoops"
         } > build-evidence.txt 2>&1
         cat build-evidence.txt
 
@@ -742,7 +784,7 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: ${{ env.DEVICE_NAME }}-Pure-${{ env.BUILD_TIMESTAMP }}
+        name: ${{ env.DEVICE_NAME }}-Lite-${{ env.BUILD_TIMESTAMP }}
         # 只上傳白名單目錄，別顆晶片的 *-ram-*-bl2.bin 不會進 artifact
         path: ${{ env.FIRMWARE_RELEASE_DIR }}
 
@@ -757,17 +799,17 @@ jobs:
         DEVICE="$DEVICE_NAME"
 
         # 對外標籤只留「設備 + 版本線 + 時間」，不帶品牌、上游作者與分支名。
-        RELEASE_TAG="${DEVICE}-Pure-${BUILD_TIME}"
+        RELEASE_TAG="${DEVICE}-Lite-${BUILD_TIME}"
         RELEASE_TAG=$(echo "$RELEASE_TAG" | sed 's/[^a-zA-Z0-9._-]/-/g')
 
         # 固件号：人一眼能认出这一版是哪一个构建
-        FIRMWARE_NO="Pure-${BUILD_TIME}-r${{ github.run_number }}"
+        FIRMWARE_NO="Lite-${BUILD_TIME}-r${{ github.run_number }}"
 
         echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
         echo "firmware_no=${FIRMWARE_NO}" >> "$GITHUB_OUTPUT"
 
         cat <<EOF > release.txt
-        ## Cudy TR3600 v1 — OpenWrt 固件（功能版 + 性能優化）
+        ## Cudy TR3600 v1 — OpenWrt 固件（Lite 稳定版）
 
         **固件号**：\`${FIRMWARE_NO}\` ｜ **编译时间**：$(date '+%Y-%m-%d %H:%M:%S') (Asia/Shanghai)
         **构建基底**：\`openwrt-25.12\` + Cudy TR3600 v1 板级支持 ｜ **配置文件**：\`${{ env.CONFIG_FILE }}\`
@@ -778,21 +820,19 @@ jobs:
         | 類別 | 套件 |
         |------|------|
         | 風扇 | **TR3600 智能風扇**（內建於 \`vendor/\`，不依賴第三方倉庫） |
-        | VPN / 組網 | ZeroTier、Tailscale、WireGuard、OpenVPN |
-        | 代理 | PassWall2（**只編 Xray 核心**）＋ dnsmasq-full |
-        | DNS | mosdns、DDNS（\`luci-app-ddns\`）、ddns-go |
-        | 下載 | aria2 |
-        | 共享 | Samba4、WebDAV |
+        | 組網 | Tailscale（含 LuCI）、WireGuard（kmod + 工具 + LuCI 協定頁） |
         | USB | 儲存（ext4 / exfat / ntfs3 + block-mount）、約 11 種網卡晶片、手機共享（RNDIS / NCM / EEM）、WWAN（QMI / MBIM）、4 種 USB 序列埠 |
         | 無線 | \`wpad-mbedtls\`（含 **802.11r/k/v 快速漫遊** 與 WPS） |
 
-        > **刻意沒裝**：iStore 商店、OpenClash、SSR+、smartdns、第三方主題
-        > （Argon / Aurora / Kucat）、工具類外掛（ttyd / filemanager / authshield）。
-        > 要加請自行用 \`apk\` 或 LuCI 的「軟體套件」頁安裝。
+        > **这一版是「稳定优先」的 Lite 版（2026-11-12 重建）**：砍掉了全部常驻
+        > 用户态应用 —— aria2、Samba4、WebDAV、mosdns、DDNS（ddns-scripts /
+        > ddns-go）、OpenVPN、ZeroTier、minidlna、stubby、miniupnpd。
+        > 原因：实机连续自动重启且 pstore 查不到 panic，而这批服务是 512 MB
+        > 内存下最可能的 OOM / 卡死来源。路由器本职（拨号 / NAT / WiFi / SSH /
+        > mesh）一个都没少。要用某个功能，LuCI → 软件套件页 \`apk add\` 即可。
 
-        > ⚠️ **ZeroTier 只有 CLI，沒有 LuCI 介面** —— 上游 \`luci-app-zerotier\`
-        > 已不存在（2026-10-13 實測）。請用 \`zerotier-cli\` 或 UCI 設定。
-        > 其餘外掛在 LuCI 裡都有頁面。
+        > **第三方 feed（kenzok8）已整个移除**：本版所有套件都来自 OpenWrt
+        > 官方 feed + 本仓库内建风扇插件，建置不再依赖任何会漂移的外部 feed。
 
         ### ⚡ 性能優化
 
@@ -803,7 +843,9 @@ jobs:
         - ✅ **TCP 緩衝區**：rmem/wmem 上限 16 MB（2.5G WAN 高頻寬下不卡吞吐）
         - ✅ **硬體流量卸載（HWNAT）**：\`flow_offloading\` + \`flow_offloading_hw\` 預設開啟，
           轉發幾乎不吃 CPU（要用 SQM 記得關掉）
-        - ✅ **WED 無線卸載**：\`CONFIG_WED_HW_RRO_SUPPORT=y\`
+        - ❌ **WED 無線卸載：明確關閉**（\`/etc/modprobe.d/mt7996e.conf\` →
+          \`options mt7996e wed_enable=0\`）。WED 是跨 PCIe 傳 DMA 描述符的路徑，
+          一次 AER 錯誤就是吞吐崩塌或 panic；原廠 Cudy 固件同樣不開。
         - ✅ **zram**：壓縮記憶體當 swap，記憶體吃緊時不 OOM
 
         ### 🔧 板級修正
@@ -818,6 +860,32 @@ jobs:
         - ✅ **無線**：mt76 \`mt7996_mcu_add_sta()\` 改為先送 STA_REC、後送 VoW/DRR
           （修正 \`wifi down/up\` 後客戶端再也連不上的問題）
         - ✅ **風扇插件已內建**於倉庫 \`vendor/luci-app-tr3600-fan\`，不依賴第三方倉庫
+
+        ### 🩺 稳定性（本版重点，2026-11-12）
+
+        上一版实机表现为「分钟级自动重启」，而 `pstore` 里永远空空如也 ——
+        既没有 panic 记录，也没有能对上的 dmesg。这一版针对「症状」和
+        「看不见症状」两件事一起动手：
+
+        - 🗑️ **删除 `tr3600-4g-wwatch` 看门狗**：它每分钟检查 4G tether，
+          没插 dongle 时会 `forcing usb replug`，对整个 USB root hub 反复
+          断电重插。已从镜像里彻底移除（不是禁用），配置里残留的
+          `tr3600.wwatch.*` 不会再有任何代码去读。
+        - 🗑️ **删除 04:30 每日定时重启**：它把真正的崩溃掩盖了（uptime 永远
+          不超过一天，看起来一切正常），还可能在升级中途触发。
+        - ✅ **`pci=noaer` 进 bootargs**：MT7990 的 PCIe 链路出 AER
+          `synchronous external abort` 时，恢复路径会走到 panic。报告这里
+          没有任何用处，直接不报告。
+        - ✅ **`pstore`/`ramoops`（1 MiB，DRAM 末端）**：真的再崩，下一次开机
+          就能在 `/sys/fs/pstore` 里看到上次的 console + panic。这是这次重建
+          唯一「以后能查」的东西。
+        - ✅ **WED 明确关闭**（见上），与原厂 Cudy 固件一致。
+        - ✅ **只留官方 feed**：第三方 feed 漂移是过去编译失败的主因，现在
+          整条建置线不再有外部依赖。
+
+        > 如果刷完仍然重启：先看 `/sys/fs/pstore/` 有没有 `console-ramoops-0`，
+        > 那里面就是这次的真正原因。没有的话，说明复位来自硬件/看门狗
+        > （PMIC、BL31、外部复位），优先级应该转到电源与 USB 负载上。
 
         ### 📥 刷機
 
@@ -874,6 +942,6 @@ jobs:
       with:
         keep_latest: 10
         delete_tags: true
-        delete_tag_pattern: '^${{ env.DEVICE_NAME }}-Pure'
+        delete_tag_pattern: "^${{ env.DEVICE_NAME }}-Lite"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

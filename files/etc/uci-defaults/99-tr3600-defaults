@@ -89,20 +89,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Scheduled reboot (autoreboot).
+# Scheduled reboot — deliberately NOT installed.
 #
-# Official 25.12 has no luci-app-autoreboot, so we use cron: reboot every day
-# at 04:30 (quiet hours).  Only if the user has not already set their own
-# schedule.
+# Before 2026-11-12 this script wrote `30 4 * * * /sbin/reboot` into
+# /etc/crontabs/root "to keep the box fresh". On a router that was already
+# randomly resetting, a nightly forced reboot did two bad things: it hid real
+# crashes (uptime never exceeded ~24 h, so nothing looked wrong) and it could
+# reboot in the middle of an upgrade. A router should stay up; if it cannot,
+# we need the evidence, not a mask.
+#
+# If a user really wants a schedule they can add it themselves:
+#   echo '30 4 * * * /sbin/reboot' >> /etc/crontabs/root; /etc/init.d/cron restart
 # ---------------------------------------------------------------------------
-if [ ! -f /etc/crontabs/root ]; then
-	mkdir -p /etc/crontabs
-	echo '30 4 * * * /sbin/reboot' > /etc/crontabs/root
-	/etc/init.d/cron enable >/dev/null 2>&1
-	/etc/init.d/cron restart >/dev/null 2>&1
-elif ! grep -q 'reboot' /etc/crontabs/root 2>/dev/null; then
-	echo '30 4 * * * /sbin/reboot' >> /etc/crontabs/root
-	/etc/init.d/cron restart >/dev/null 2>&1
-fi
 
 exit 0

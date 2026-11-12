@@ -7,7 +7,8 @@
 #
 # 這個腳本做三件事：
 #   1. 預設 IP / 語言 / 主題（bootstrap，OpenWrt 原生）
-#   2. 板級 DTS 修正 0001 / 0004 / 0005 / 0006 / 0007 / 0008（風扇 + LED + WiFi MAC + USB 穩定）
+#   2. 板級 DTS 修正 0001 / 0004 / 0005 / 0006 / 0007 / 0008 / 0009（風扇 + LED +
+#      WiFi MAC + USB 穩定 + pci=noaer/ramoops）
 #   3. mt76 backport 0002（STA_REC 先於 VoW，修 wifi down/up 後連不上）
 #   ＋ uci-defaults 兜底（語言 / 主題 / HWNAT 硬體流量卸載）
 #
@@ -151,13 +152,19 @@ apply_dts_patch 0007-tr3600-fan-curve-tune    'cooling-levels = <0 128 200 255>;
 #    啟用 USB2 PHY、禁用 SoC USB3 PHY（tphyu3port0）。soapmancn 錯誤啟用
 #    USB3 PHY 是 CMIOT ML307R 反復掉線/重枚舉的根因。marker 用 u3p-dis-msk。
 apply_dts_patch 0008-tr3600-usb-stability    'mediatek,u3p-dis-msk = <0x1>;'
+# 7. 可診斷性 + 關 AER：bootargs 加 pci=noaer（MT7990 PCIe 的 AER abort
+#    風暴會一路走到 panic，報告沒有意義）；並在 DRAM 末端留 1 MiB ramoops，
+#    讓 /sys/fs/pstore 真的能留下上一次 panic 的 console（以前永遠是空的）。
+apply_dts_patch 0009-tr3600-noaer-ramoops     'pci=noaer'
 
 grep -qF 'pinctrl-0 = <&pwm_pins>;' "$DTS" || { echo "ERROR: pinctrl not fixed"; exit 1; }
 grep -qF 'temperature = <68000>;' "$DTS"   || { echo "ERROR: fan curve 0007 did not land"; exit 1; }
 grep -qF 'mediatek,u3p-dis-msk = <0x1>;' "$DTS" || { echo "ERROR: USB stability 0008 did not land"; exit 1; }
 grep -qF '&tphyu3port0' "$DTS" && grep -A2 '&tphyu3port0' "$DTS" | grep -qF 'status = "disabled";' \
 	|| { echo "ERROR: USB3 PHY 0008 not disabled"; exit 1; }
-echo "  OK: PWM0 fan / white+red LEDs / vendor MAC layout / 68-78-88 C fan curve / USB stability (u3 masked, USB3 PHY off)"
+grep -qF 'compatible = "ramoops";' "$DTS" || { echo "ERROR: ramoops 0009 did not land"; exit 1; }
+grep -qF 'pci=noaer' "$DTS" || { echo "ERROR: pci=noaer 0009 did not land"; exit 1; }
+echo "  OK: PWM0 fan / white+red LEDs / vendor MAC layout / 68-78-88 C fan curve / USB stability (u3 masked, USB3 PHY off) / noaer + ramoops"
 
 # =========================================================
 # 5. mt76 STA_REC / VoW 順序
