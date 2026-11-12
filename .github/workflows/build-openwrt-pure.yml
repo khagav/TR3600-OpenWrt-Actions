@@ -416,7 +416,6 @@ jobs:
           CONFIG_PACKAGE_rpcd-mod-wireguard \
           CONFIG_PACKAGE_odhcpd-ipv6only \
           CONFIG_PACKAGE_luci-app-tr3600-fan \
-          CONFIG_PACKAGE_default-settings \
         ; do
           if grep -q "^${sym}=y" .config; then
             echo "  [OK] $sym"
@@ -434,7 +433,7 @@ jobs:
           echo "::error title=wpad 没换::wpad-basic-mbedtls 仍为 =y，缺 802.11r/k/v 与 WPS"
           exit 1
         fi
-        echo "✅ 必需包齐全（23 项：fq 排程 / wpad-mbedtls / USB / IPv6 / tailscale / wireguard / 风扇）"
+        echo "✅ 必需包齐全（22 项：fq 排程 / wpad-mbedtls / USB / IPv6 / tailscale / wireguard / 风扇）"
 
         # ---- 反向断言：Lite 砍掉的包不许回来 ----
         # oldconfig 会把 =y 变成 not set 或反之，也可能被某个默认包重新拖进来。
