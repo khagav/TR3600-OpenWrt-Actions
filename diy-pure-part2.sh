@@ -153,8 +153,9 @@ apply_dts_patch 0007-tr3600-fan-curve-tune    'cooling-levels = <0 128 200 255>;
 #    USB3 PHY 是 CMIOT ML307R 反復掉線/重枚舉的根因。marker 用 u3p-dis-msk。
 apply_dts_patch 0008-tr3600-usb-stability    'mediatek,u3p-dis-msk = <0x1>;'
 # 7. 可診斷性 + 關 AER：bootargs 加 pci=noaer（MT7990 PCIe 的 AER abort
-#    風暴會一路走到 panic，報告沒有意義）；並在 DRAM 末端留 1 MiB ramoops，
-#    讓 /sys/fs/pstore 真的能留下上一次 panic 的 console（以前永遠是空的）。
+#    風暴會一路走到 panic，報告沒有意義）。ramoops 刻意不自己加 ——
+#    原廠 DTS 已有 64 KiB ramoops@5ffb0000（我們之前加的 1 MiB @5ff00000
+#    與它重疊，被內核拒絕）。依賴原廠節點即可，pstore 能留痕。
 apply_dts_patch 0009-tr3600-noaer-ramoops     'pci=noaer'
 
 grep -qF 'pinctrl-0 = <&pwm_pins>;' "$DTS" || { echo "ERROR: pinctrl not fixed"; exit 1; }
@@ -162,9 +163,8 @@ grep -qF 'temperature = <68000>;' "$DTS"   || { echo "ERROR: fan curve 0007 did 
 grep -qF 'mediatek,u3p-dis-msk = <0x1>;' "$DTS" || { echo "ERROR: USB stability 0008 did not land"; exit 1; }
 grep -qF '&tphyu3port0' "$DTS" && grep -A2 '&tphyu3port0' "$DTS" | grep -qF 'status = "disabled";' \
 	|| { echo "ERROR: USB3 PHY 0008 not disabled"; exit 1; }
-grep -qF 'compatible = "ramoops";' "$DTS" || { echo "ERROR: ramoops 0009 did not land"; exit 1; }
 grep -qF 'pci=noaer' "$DTS" || { echo "ERROR: pci=noaer 0009 did not land"; exit 1; }
-echo "  OK: PWM0 fan / white+red LEDs / vendor MAC layout / 68-78-88 C fan curve / USB stability (u3 masked, USB3 PHY off) / noaer + ramoops"
+echo "  OK: PWM0 fan / white+red LEDs / vendor MAC layout / 68-78-88 C fan curve / USB stability (u3 masked, USB3 PHY off) / noaer (ramoops via stock node)"
 
 # =========================================================
 # 5. mt76 backports (STA_REC/VoW 顺序 + PCIe 复位保护)

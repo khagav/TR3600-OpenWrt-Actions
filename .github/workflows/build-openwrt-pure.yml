@@ -15,7 +15,7 @@ name: Build Cudy TR3600 OpenWrt Pure
 #   建置線只依賴 OpenWrt 官方 feed。另加 3 條穩定化措施：
 #     * 刪掉 tr3600-4g-wwatch 看門狗（無 dongle 時每分鐘強制 USB 重插）
 #     * 刪掉 04:30 每日定時重啟 cron（把真崩潰蓋掉了）
-#     * pci=noaer + RAM 末端 1 MiB ramoops（讓下次 panic 留得下來）
+#     * pci=noaer（壓 MT7990 PCIe AER 風暴；ramoops 依賴原廠 64 KiB 節點）
 #   WED 同時在 /etc/modprobe.d/mt7996e.conf 明確關閉。
 #
 # 基底： openwrt-25.12 + Cudy TR3600 v1 板级支援（上游 PR #24596，尚未合併）
@@ -28,7 +28,7 @@ name: Build Cudy TR3600 OpenWrt Pure
 #        patches/0006-tr3600-fan-thermal-curve.patch (溫控: 60C 以下停轉, 65/75/85 三段)
 #        patches/0007-tr3600-fan-curve-tune.patch    (風扇曲線調校: 50/78/100%, 68/78/88C)
 #        patches/0008-tr3600-usb-stability.patch    (USB3 端口屏蔽 + USB3 PHY 關閉)
-#        patches/0009-tr3600-noaer-ramoops.patch    (bootargs pci=noaer + ramoops 1 MiB)
+#        patches/0009-tr3600-noaer-ramoops.patch    (bootargs pci=noaer；ramoops 依賴原廠節點)
 #
 # 已下線： patches/0008-luci-tr3600-fan-smart-suggestions.patch
 #        （風扇頁智能季節建議）—— 2026-10-13 移除，補丁留在 retired/patches/。
@@ -764,12 +764,12 @@ jobs:
             echo "  [OK] crontab 无 reboot"
           done
           echo "  [OK] 无每日定时重启 cron"
-          # 4) DTS 的 noaer / ramoops 断言（patch 之后再看一遍，防止被后续 patch 盖掉）。
+          # 4) DTS 的 noaer 断言（patch 之后再看一遍，防止被后续 patch 盖掉）。
+          #    注意：ramoops 刻意不自己加 —— 依赖原厂 64 KiB ramoops@5ffb0000，
+          #    不再断言它（之前加的 1 MiB @5ff00000 与原厂重叠被拒）。
           grep -qF 'pci=noaer' openwrt/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts \
             || { echo "  [FAIL] DTS bootargs 没有 pci=noaer"; exit 1; }
-          grep -qF 'compatible = "ramoops";' openwrt/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts \
-            || { echo "  [FAIL] DTS 没有 ramoops 节点"; exit 1; }
-          echo "  [OK] DTS: pci=noaer + ramoops"
+          echo "  [OK] DTS: pci=noaer (ramoops via stock node)"
         } > build-evidence.txt 2>&1
         cat build-evidence.txt
 
@@ -879,9 +879,9 @@ jobs:
         - ✅ **`pci=noaer` 进 bootargs**：MT7990 的 PCIe 链路出 AER
           `synchronous external abort` 时，恢复路径会走到 panic。报告这里
           没有任何用处，直接不报告。
-        - ✅ **`pstore`/`ramoops`（1 MiB，DRAM 末端）**：真的再崩，下一次开机
+        - ✅ **`pstore`/`ramoops`（原廠 64 KiB @0x5ffb0000）**：真的再崩，下一次开机
           就能在 `/sys/fs/pstore` 里看到上次的 console + panic。这是这次重建
-          唯一「以后能查」的东西。
+          唯一「以后能查」的东西（64 KiB 已实测能留完整 dmesg+console）。
         - ✅ **WED 明确关闭**（见上），与原厂 Cudy 固件一致。
         - ✅ **只留官方 feed**：第三方 feed 漂移是过去编译失败的主因，现在
           整条建置线不再有外部依赖。
