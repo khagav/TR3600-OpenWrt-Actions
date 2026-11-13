@@ -1,6 +1,7 @@
+diff --git a/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
 --- a/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
 +++ b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
-@@ -21,7 +21,13 @@
+@@ -21,10 +21,31 @@
  	};
  
  	chosen {
@@ -15,34 +16,21 @@
  		stdout-path = "serial0:115200n8";
  	};
  
-@@ -31,6 +37,30 @@
- 		reg = <0 0x40000000 0 0x20000000>;
- 	};
- 
-+	/* pstore/ramoops.
++	/* pstore/ramoops - deliberately NOT added here.
 +	 *
-+	 * The old firmware and our earlier builds left /sys/fs/pstore empty
-+	 * after every unexplained reboot, because nothing in the DTS told the
-+	 * kernel where to keep a panic. Put a 1 MiB region in the last MiB of
-+	 * the 512 MiB DRAM window; reserved-memory keeps the allocator out of
-+	 * it, so a warm reset still has the previous boot's console + panic.
++	 * The stock OpenWrt DTS (via mt7987.dtsi / the SoC dtsi) already
++	 * provides a 64 KiB ramoops at 0x5ffb0000 plus a secmon region at
++	 * 0x5ffc0000. An earlier version of this patch added its own 1 MiB
++	 * region at 0x5ff00000, which OVERLAPPED the stock ramoops + secmon;
++	 * the kernel rejected it (ramoops: already initialized, "probe with
++	 * driver ramoops failed with error -22") and only the stock 64 KiB was
++	 * used. 64 KiB proved sufficient to capture the full dmesg + console
++	 * of a real panic (2026-11-13, MT7996 PCIe synchronous external
++	 * abort), so we rely on the stock node. If the stock node ever goes
++	 * away, add a ramoops node here in a free 1 MiB region below the
++	 * stock one (e.g. 0x5fe00000, which /proc/iomem shows as reserved).
 +	 */
-+	reserved-memory {
-+		#address-cells = <2>;
-+		#size-cells = <2>;
-+		ranges;
 +
-+		ramoops@5ff00000 {
-+			compatible = "ramoops";
-+			reg = <0 0x5ff00000 0 0x00100000>;
-+			record-size = <0x00020000>;
-+			console-size = <0x00040000>;
-+			pmsg-size = <0x00020000>;
-+			ftrace-size = <0x00020000>;
-+			ecc-size = <0>;
-+		};
-+	};
-+
- 	gpio-leds {
- 		compatible = "gpio-leds";
- 
+ 	/* Cudy TR3600 v1 has 512 MiB DDR4 at 0x40000000. */
+ 	memory {
+ 		device_type = "memory";
