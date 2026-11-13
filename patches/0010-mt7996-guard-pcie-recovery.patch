@@ -1,0 +1,71 @@
+diff --git a/mt7996/mac.c b/mt7996/mac.c
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -3,6 +3,7 @@
+  * Copyright (C) 2022 MediaTek Inc.
+  */
+ 
++#include <linux/pci.h>
+ #include <linux/etherdevice.h>
+ #include <linux/timekeeping.h>
+ #include "coredump.h"
+@@ -2510,6 +2511,27 @@ void mt7996_mac_reset_work(struct work_struct *work)
+ 	if (!(READ_ONCE(dev->recovery.state) & MT_MCU_CMD_STOP_DMA))
+ 		return;
+ 
++	/*
++	 * L1 SER recovery: the code below re-arms the chip by writing a long
++	 * series of MMIO registers. If the PCIe link has already gone away
++	 * (the FW message timeout that queued us is often the *symptom* of a
++	 * dead link, not the cause), the first MMIO access raises a
++	 * synchronous external abort and the kernel panics - pci=noaer does
++	 * not help because a synchronous abort never reaches the AER path.
++	 *
++	 * Detect a dead link and, instead of poking a dead bus, do a
++	 * software-only reset and let mac80211 re-drive the device.
++	 */
++	if (dev_is_pci(dev->mt76.dev) && dev->pdev &&
++	    pci_channel_offline(dev->pdev)) {
++		dev_err(dev->mt76.dev,
++			"mt7996: PCIe link offline during L1 recovery, "
++			"falling back to software reset\n");
++		mt76_reset_device(&dev->mt76);
++		ieee80211_restart_hw(hw);
++		return;
++	}
++
+ 	dev_info(dev->mt76.dev,"\n%s L1 SER recovery start.",
+ 		 wiphy_name(hw->wiphy));
+ 
+diff --git a/mt7996/mt7996.h b/mt7996/mt7996.h
+--- a/mt7996/mt7996.h
++++ b/mt7996/mt7996.h
+@@ -6,6 +6,7 @@
+ #ifndef __MT7996_H
+ #define __MT7996_H
+ 
++#include <linux/pci.h>
+ #include <linux/interrupt.h>
+ #include <linux/ktime.h>
+ #include "../mt76_connac.h"
+@@ -413,6 +414,7 @@ struct mt7996_dev {
+ 	struct wiphy_radio_freq_range radio_freqs[MT7996_MAX_RADIOS];
+ 
+ 	struct mt7996_hif *hif2;
++	struct pci_dev *pdev;	/* NULL on non-PCIe buses */
+ 	struct mt7996_reg_desc reg;
+ 	u8 q_id[MT7996_MAX_QUEUE];
+ 	u32 q_int_mask[MT7996_MAX_QUEUE];
+diff --git a/mt7996/pci.c b/mt7996/pci.c
+--- a/mt7996/pci.c
++++ b/mt7996/pci.c
+@@ -135,6 +135,9 @@ static int mt7996_pci_probe(struct pci_dev *pdev,
+ 	if (IS_ERR(dev))
+ 		return PTR_ERR(dev);
+ 
++	/* remember the PCIe device so the recovery path can check the link */
++	dev->pdev = pdev;
++
+ 	mdev = &dev->mt76;
+ 	mt7996_wfsys_reset(dev);
+ 	hif2 = mt7996_pci_init_hif2(pdev);

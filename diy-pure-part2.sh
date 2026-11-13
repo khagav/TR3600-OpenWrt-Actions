@@ -167,13 +167,14 @@ grep -qF 'pci=noaer' "$DTS" || { echo "ERROR: pci=noaer 0009 did not land"; exit
 echo "  OK: PWM0 fan / white+red LEDs / vendor MAC layout / 68-78-88 C fan curve / USB stability (u3 masked, USB3 PHY off) / noaer + ramoops"
 
 # =========================================================
-# 5. mt76 STA_REC / VoW 順序
+# 5. mt76 backports (STA_REC/VoW 顺序 + PCIe 复位保护)
 # =========================================================
 P2="$PATCHDIR/0002-mt76-mt7996-sta-rec-before-vow.patch"
+P10="$PATCHDIR/0010-mt7996-guard-pcie-recovery.patch"
 MT76PATCHDIR=package/kernel/mt76/patches
 
 echo "--------------------------------------------------------"
-echo "[2/2] mt76 backport -> $MT76PATCHDIR/"
+echo "[2/3] mt76 backport STA_REC/VoW -> $MT76PATCHDIR/"
 if [ ! -f "$P2" ]; then
 	echo "ERROR: $P2 not found"
 	exit 1
@@ -190,6 +191,15 @@ fi
 mkdir -p "$MT76PATCHDIR"
 cp "$P2" "$MT76PATCHDIR/0202-wifi-mt76-mt7996-send-the-STA_REC-before-the-per-station-VoW-setup.patch"
 echo "  installed: $(basename "$MT76PATCHDIR"/0202-*.patch)"
+
+echo "--------------------------------------------------------"
+echo "[3/3] mt76 backport PCIe 复位保护 -> $MT76PATCHDIR/"
+if [ ! -f "$P10" ]; then
+	echo "ERROR: $P10 not found"
+	exit 1
+fi
+cp "$P10" "$MT76PATCHDIR/0203-wifi-mt76-mt7996-guard-L1-SER-recovery-against-dead-pcie.patch"
+echo "  installed: $(basename "$MT76PATCHDIR"/0203-*.patch)"
 
 echo "========================================================"
 echo " TR3600 pure build: part2 done (DTS + mt76 + 性能優化)"

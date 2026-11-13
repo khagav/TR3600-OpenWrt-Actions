@@ -513,9 +513,13 @@ jobs:
         grep -n "mt7996_mcu_add_group" "$SRC/mt7996/mcu.c" || true
 
         cd "$SRC"
-        echo "--- dry-run 套用 backport ---"
+        echo "--- dry-run 套用 backport (STA_REC/VoW) ---"
         patch -p1 --dry-run --forward < "$GITHUB_WORKSPACE/patches/0002-mt76-mt7996-sta-rec-before-vow.patch"
-        echo "✅ mt76 backport 可正常套用"
+        echo "✅ mt76 backport 0002 可正常套用"
+
+        echo "--- dry-run 套用 backport (PCIe 复位保护) ---"
+        patch -p1 --dry-run --forward < "$GITHUB_WORKSPACE/patches/0010-mt7996-guard-pcie-recovery.patch"
+        echo "✅ mt76 backport 0010 可正常套用"
 
     # =========================================================
     # 12. 编译固件

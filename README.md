@@ -38,6 +38,8 @@ Release 保留最近 10 個。
 | `0005-tr3600-wifi-mac-layout` | 2.4G / 5G 的 MAC 位址對不上 | 2.4 GHz = **base+0**（與 LAN 相同）、5 GHz = **base+0x10** |
 | `0006-tr3600-fan-thermal-curve` | 待機時風扇持續低鳴 | 60 °C 以下**停轉**、65/75/85 °C 三段（上游 40 °C 就鎖 50 %） |
 | `0007-tr3600-fan-curve-tune` | 0006 的 65 °C 那段是 25 % PWM，**實測完全沒有降溫效果**；本板待機剛好 64 °C，卡在門檻上 | 改成 **50 / 78 / 100 %**，曲線整條上移到 **68 / 78 / 88 °C**——待機真的停轉，要降溫時每一段都有用 |
+| `0009-tr3600-noaer-ramoops` | 舊固件每次莫名重啟後 pstore 全空，看不到原因 | bootargs 加 **`pci=noaer`**（壓 PCIe AER 風暴）+ DTS 加 **ramoops**（真崩了留 panic/console） |
+| `0010-mt7996-guard-pcie-recovery` | MT7996 固件訊息超時觸發 MAC 復位，復位路徑在 PCIe 已失效時做 MMIO → **同步外部中止 panic** | `mt7996_mac_reset_work()` L1 復位前檢查 `pci_channel_offline()`，鏈路死了就**跳過 MMIO、改走純軟體復位 + `ieee80211_restart_hw()`** |
 
 > ⚠️ **0007 才是最終值**：`cooling-levels = 0 128 200 255`、trip `68000 / 78000 / 88000`。
 > 拿 0006 的 `0 64 160 255` / 65000 去比，會誤判成「patch 沒生效」。
@@ -74,7 +76,10 @@ Release 保留最近 10 個。
 │   ├── 0004-tr3600-led-colours.patch
 │   ├── 0005-tr3600-wifi-mac-layout.patch
 │   ├── 0006-tr3600-fan-thermal-curve.patch
-│   └── 0007-tr3600-fan-curve-tune.patch
+│   ├── 0007-tr3600-fan-curve-tune.patch
+│   ├── 0008-tr3600-usb-stability.patch
+│   ├── 0009-tr3600-noaer-ramoops.patch
+│   └── 0010-mt7996-guard-pcie-recovery.patch
 └── vendor/
     └── luci-app-tr3600-fan/  # 內建的風扇插件（10 個檔案）
 ```
